@@ -27,8 +27,9 @@ my class BOOTSTRAPATTR {
     method type() { $!type }
     method box_target() { $!box_target }
     method has_accessor() { 0 }
+    method has-accessor() { 0 }
     method build() { }
-    method is_generic() { $!type.HOW.is_generic($!type) }
+    method is_generic() { $!type.HOW.archetypes.generic }
     method instantiate_generic($type_environment) {
         my $ins := $!type.HOW.instantiate_generic($!type, $type_environment);
         self.new(:name($!name), :box_target($!box_target), :type($ins))
@@ -41,7 +42,6 @@ pir::perl6_set_type_packagehow__vP(Perl6::Metamodel::PackageHOW);
 
 # class Mu { ... }
 my stub Mu metaclass Perl6::Metamodel::ClassHOW { ... };
-pir::perl6_set_type_mu__vP(Mu);
 
 # XXX Move out of bootstrap when possible.
 Mu.HOW.add_parrot_vtable_mapping(Mu, 'get_bool',
@@ -65,6 +65,7 @@ Mu.HOW.add_parrot_vtable_mapping(Mu, 'defined',
 my stub Any metaclass Perl6::Metamodel::ClassHOW { ... };
 Any.HOW.add_parent(Any, Mu);
 Perl6::Metamodel::ClassHOW.set_default_parent_type(Any);
+pir::perl6_set_types_mu_any__vP(Mu, Any);
 
 # class Cool is Any { ... }
 my stub Cool metaclass Perl6::Metamodel::ClassHOW { ... };
@@ -163,7 +164,7 @@ Attribute.HOW.add_method(Attribute, 'build', sub ($self) {
 Attribute.HOW.add_method(Attribute, 'is_generic', sub ($self) {
         my $type := pir::getattribute__PPPs(pir::perl6_decontainerize__PP($self),
             Attribute, '$!type');
-        pir::perl6_booleanize__PI($type.HOW.is_generic($type));
+        pir::perl6_booleanize__PI($type.HOW.archetypes.generic);
     });
 Attribute.HOW.add_method(Attribute, 'instantiate_generic', sub ($self, $type_environment) {
         my $dcself   := pir::perl6_decontainerize__PP($self);
@@ -288,17 +289,25 @@ Parameter.HOW.add_attribute(Parameter, BOOTSTRAPATTR.new(:name<$!attr_package>, 
 Parameter.HOW.add_method(Parameter, 'is_generic', sub ($self) {
         # If nonimnal type is generic, so are we.
         my $type := pir::getattribute__PPPs($self, Parameter, '$!nominal_type');
-        pir::perl6_booleanize__PI($type.HOW.is_generic($type))
-    });
-Parameter.HOW.add_method(Parameter, 'instantiate_generic', sub ($self, $type_environment) {
-        # Clone with the type instantiated.
-        my $ins  := pir::repr_clone__PP($self);
-        my $type := pir::getattribute__PPPs($self, Parameter, '$!nominal_type');
-        pir::setattribute__0PPsP($ins, Parameter, '$!nominal_type',
-            $type.HOW.instantiate_generic($type, $type_environment))
+        pir::perl6_booleanize__PI($type.HOW.archetypes.generic)
     });
 my $SIG_ELEM_IS_RW   := 256;
 my $SIG_ELEM_IS_COPY := 512;
+my $SIG_ELEM_NOMINAL_GENERIC := 524288;
+Parameter.HOW.add_method(Parameter, 'instantiate_generic', sub ($self, $type_environment) {
+        # Clone with the type instantiated.
+        my $ins      := pir::repr_clone__PP($self);
+        my $type     := pir::getattribute__PPPs($self, Parameter, '$!nominal_type');
+        my $ins_type := $type.HOW.instantiate_generic($type, $type_environment);
+        unless $ins_type.HOW.archetypes.generic {
+            my $flags := pir::repr_get_attr_int__IPPs($ins, Parameter, '$!flags');
+            if $flags +& $SIG_ELEM_NOMINAL_GENERIC {
+                pir::repr_bind_attr_int__0PPsI($ins, Parameter, '$!flags',
+                    $flags - $SIG_ELEM_NOMINAL_GENERIC)
+            }
+        }
+        pir::setattribute__0PPsP($ins, Parameter, '$!nominal_type', $ins_type)
+    });
 Parameter.HOW.add_method(Parameter, 'set_rw', sub ($self) {
         my $dcself := pir::perl6_decontainerize__PP($self);
         my $cd     := pir::getattribute__PPPs($dcself, Parameter, '$!container_descriptor');
@@ -390,7 +399,7 @@ Code.HOW.add_method(Code, 'name', sub ($self) {
         ~pir::getattribute__PPPs(pir::perl6_decontainerize__PP($self),
             Code, '$!do')
     });
-Code.HOW.add_method(Code, '!set_name', sub ($self, $name) {
+Code.HOW.add_method(Code, 'set_name', sub ($self, $name) {
         pir::assign__vPS(
             pir::getattribute__PPPs(pir::perl6_decontainerize__PP($self), Code, '$!do'),
             $name)
@@ -399,7 +408,8 @@ Code.HOW.add_method(Code, 'dispatcher', sub ($self) {
         pir::getattribute__PPPs(pir::perl6_decontainerize__PP($self),
             Code, '$!dispatcher')
     });
-
+pir::perl6_set_type_code__vP(Code);
+    
 # Need to actually run the code block. Also need this available before we finish
 # up the stub.
 Code.HOW.add_parrot_vtable_mapping(Code, 'invoke', nqp::null());
@@ -597,7 +607,9 @@ my stub Bool metaclass Perl6::Metamodel::ClassHOW { ... };
 Bool.HOW.add_parent(Bool, Cool);
 Bool.HOW.add_attribute(Bool, BOOTSTRAPATTR.new(:name<$!value>, :type(int), :box_target(1)));
 Bool.HOW.add_parrot_vtable_mapping(Bool, 'get_bool',
-    sub ($self) { nqp::unbox_i($self) });
+    sub ($self) {
+        pir::repr_defined__IP($self) ?? nqp::unbox_i($self) !! 0
+    });
 Bool.HOW.publish_parrot_vtable_mapping(Bool);
     
 # Set up Stash type, using a Parrot hash under the hood for storage.
@@ -653,13 +665,13 @@ Mu.HOW.publish_parrot_vtable_mapping(Mu);
 my $PROCESS;
 my $hll_ns := pir::get_root_global__PS('perl6');
 if pir::exists($hll_ns, 'PROCESS') {
-    $PROCESS := $hll_ns['PROCESS'];
+    $PROCESS := $hll_ns<PROCESS>;
 }
 else {
     my stub PROCESS metaclass Perl6::Metamodel::ModuleHOW { ... };
     PROCESS.HOW.compose(PROCESS);
     Perl6::Metamodel::ModuleHOW.add_stash(PROCESS);
-    $hll_ns['PROCESS'] := $PROCESS := PROCESS;
+    $hll_ns<PROCESS> := $PROCESS := PROCESS;
 }
 
 # Bool::False and Bool::True.

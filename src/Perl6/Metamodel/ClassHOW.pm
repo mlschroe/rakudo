@@ -16,15 +16,31 @@ class Perl6::Metamodel::ClassHOW
     does Perl6::Metamodel::Trusting
     does Perl6::Metamodel::BUILDPLAN
     does Perl6::Metamodel::Mixins
-    does Perl6::Metamodel::NonGeneric
     does Perl6::Metamodel::ParrotInterop
 {
     has @!does_list;
+    has @!fallbacks;
     has $!composed;
+
+    my $archetypes := Perl6::Metamodel::Archetypes.new( :nominal(1), :inheritable(1) );
+    method archetypes() {
+        $archetypes
+    }
 
     method new_type(:$name = '<anon>', :$repr = 'P6opaque', :$ver, :$auth) {
         my $metaclass := self.new(:name($name), :ver($ver), :auth($auth));
         self.add_stash(pir::repr_type_object_for__PPS($metaclass, $repr));
+    }
+    
+    # Adds a new fallback for method dispatch. Expects the specified
+    # condition to have been met (passes it the object and method name),
+    # and if it is calls $calculator with the object and method name to
+    # calculate an invokable object.
+    method add_fallback($obj, $condition, $calculator) {
+        my %desc;
+        %desc<cond> := $condition;
+        %desc<calc> := $calculator;
+        @!fallbacks[+@!fallbacks] := %desc;
     }
 
     method compose($obj) {
@@ -107,6 +123,13 @@ class Perl6::Metamodel::ClassHOW
             return -> *@pos_args, *%named_args {
                 $junction_autothreader($p6name, |@pos_args, |%named_args)
             };
+        }
+        
+        # Consider other fallbacks, if we have any.
+        for @!fallbacks {
+            if ($_<cond>)($obj, $name) {
+                return ($_<calc>)($obj, $name);
+            }
         }
 
         # Otherwise, didn't find anything.

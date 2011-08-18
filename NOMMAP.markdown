@@ -1,6 +1,6 @@
 # Roadmap for "nom" Branch
 
-Last Updated 3 Aug 2011
+Last Updated 7 Aug 2011
 
 ## Punch list for nom->master and nom distribution
 
@@ -9,26 +9,20 @@ switching nom to be the new 'master' branch, and before releasing
 a nom-based distribution.  Each item below contains an importance
 (1 == must have, 2 == ought to have, 3 == nice to have) for
 branch and distribution, an estimate of the difficulty 
-(* == easy, **** = hard), and any identified 
+(\* == easy, \*\*\*\* = hard), and any identified 
 responsible parties.
 
-* "make install" (1, 1, ***, jnthn pmichaud)
-* Method delegation (2, 2, ***, jnthn)
-* Parametric roles (2, 2, ***, jnthn)
+* Parametric roles (2, 2, \*\*\*, jnthn)
 * Enums to level of master (2, 1, ???, ???)
-* Grammars, qregex, other regex stuff (1, 1, ***, pmichaud)
-* Nested signatures (2, 1, ***, jnthn)
+* Grammars, qregex, other regex stuff (1, 1, \*\*\*, pmichaud)
 * Buf (2, 1, **, pmichaud)
-* DateTime, Date (2, 1, **, ???)
-* Code constraints on multidispatch (2, 1, ***, jnthn)
-* "use" on non-compiled modules (1, 1, ***, jnthn)
-* Hyper metaoperator (1, 1, **, pmichaud)
-* Operator overloading (2, 1, *, ???)   (may be done already)
-* Define new operators (2, 1, **, pmichaud) (awaiting other regex updates)
-* Whatever currying (2, 1, ???, ???) (may be done already)
+* DateTime, Date (2, 1, \*\*, ???)
+* Define new operators (2, 1, \*\*, pmichaud) (awaiting other regex updates)
+* Whatever currying (2, 1, ???, ???) (*.method case still missing, return type is not WhateverCode)
 * MAIN (2, 1, ???, ???)
-* callframe (3, 1, ???, ???)
 * modules working with nom (3, 1, ???, ???)
+* fix meta-dispatchers to not flatten positionals (3, 2, ???, ???)
+* fix huge memory leak in simple while loop (2, 1, ???, ???)
 
 ## Other NOMMAP notes
 
@@ -52,11 +46,6 @@ For my X::Base { ... }, my Foo::Bar { ... } etc. The our-scoped ones work.
 ## when statements
 when needs to properly find use correct outer scope
 
-## Flesh out signatures and parameters
-While much binding works again now, there's some stuff to "put back":
-* |$c
-* Sub-signatures
-
 ## Fix up binding some more
 Get ::= correcter, and a bit more stuff on := also.
 
@@ -66,13 +55,6 @@ Many things are working, some are not...
 * role R1[::T] does R2[T] { ... }
 * Multiple variants of a single role
 * Role subtype checking
-
-## Meta-operators
-* Hyper
-
-## Missing object model bits
-* Some support for augment
-* handles
 
 ## Custom Operators
 Get these working again.
@@ -93,6 +75,13 @@ Same for my %h and hashes.
 ## Phasers
 * END in pre-compiled mainline case
 
-## Make nom installable
+
+## Switch Numeric and Real to be roles
+They are classes right now, which is wrong.
 
 ## fix segfaults
+
+    wget https://github.com/colomon/mandelbrot/raw/master/bin/mandelbrot-color.pl
+    ./perl6 mandelbrot-color.pl 201
+
+segfaults repeatably after about 1 minute

@@ -172,7 +172,7 @@ grammar Perl6::Grammar is HLL::Grammar {
              || ($<spaces>.to - $<spaces>.from) <= $*VMARGIN }>
 
         $<text> = [
-            \h* <!before '=' \w> \N+ <pod_newline>
+            \h* <!before '=' \w> <pod_string> <pod_newline>
         ] +
     }
 
@@ -182,6 +182,24 @@ grammar Perl6::Grammar is HLL::Grammar {
             && ($<spaces>.to - $<spaces>.from) > $*VMARGIN }>
         $<text> = [
             [<!before '=' \w> \N+] ** [<pod_newline> $<spaces>]
+        ]
+    }
+
+    token pod_formatting_code {
+        $<code>=<[A..Z]>
+        '<' { $*POD_IN_FORMATTINGCODE := 1 }
+        $<content>=[ <!before '>'> <pod_string_character> ]+
+        '>' { $*POD_IN_FORMATTINGCODE := 0 }
+    }
+
+    token pod_string {
+        <pod_string_character>+
+    }
+
+    token pod_string_character {
+        <pod_formatting_code> || $<char>=[ \N || [
+            <?{ $*POD_IN_FORMATTINGCODE == 1}> \n <!before \h* '=' \w>
+            ]
         ]
     }
 
@@ -198,27 +216,31 @@ grammar Perl6::Grammar is HLL::Grammar {
             <pod_code_parent> { $*ALLOW_CODE := 1 }
             || <identifier>
         ]
+        [ \h+ <colonpair> ]?
         <pod_newline>+
         [
          <pod_content> *
-         ^^ \h* '=end' \h+ $<type> <pod_newline>
+         ^^ $<spaces> '=end' \h+ $<type> <pod_newline>
          ||  <.panic: '=begin without matching =end'>
         ]
     }
 
     token pod_block:sym<delimited_raw> {
-        ^^ \h* '=begin' \h+ <!before 'END'>
+        ^^
+        $<spaces> = [ \h* ]
+        '=begin' \h+ <!before 'END'>
                         $<type>=[ 'code' || 'comment' ]
+                        [ \h+ <colonpair> ]?
                         <pod_newline>+
         [
          $<pod_content> = [ .*? ]
-         ^^ \h* '=end' \h+ $<type> <pod_newline>
+         ^^ $<spaces> '=end' \h+ $<type> <pod_newline>
          ||  <.panic: '=begin without matching =end'>
         ]
     }
 
     token pod_block:sym<delimited_table> {
-        ^^ \h* '=begin' \h+ 'table' <pod_newline>+
+        ^^ \h* '=begin' \h+ 'table' [ \h+ <colonpair> ]? <pod_newline>+
         [
          <table_row>*
          ^^ \h* '=end' \h+ 'table' <pod_newline>
@@ -248,7 +270,7 @@ grammar Perl6::Grammar is HLL::Grammar {
         :my $*ALLOW_CODE := 0;
         '=for' \h+ <!before 'END'>
         $<type> = <identifier>
-
+        [ \h+ <colonpair> ]?
         <pod_newline>
         $<pod_content> = <pod_textcontent>?
     }
@@ -256,12 +278,13 @@ grammar Perl6::Grammar is HLL::Grammar {
     token pod_block:sym<paragraph_raw> {
         ^^ \h* '=for' \h+ <!before 'END'>
                           $<type>=[ 'code' || 'comment' ]
+                          [ \h+ <colonpair> ]?
                           <pod_newline>
         $<pod_content> = [ \h* <!before '=' \w> \N+ \n ]+
     }
 
     token pod_block:sym<paragraph_table> {
-        ^^ \h* '=for' \h+ 'table' <pod_newline>
+        ^^ \h* '=for' \h+ 'table' [ \h+ <colonpair> ]? <pod_newline>
         [ <!before \h* \n> <table_row>]*
     }
 
@@ -273,17 +296,19 @@ grammar Perl6::Grammar is HLL::Grammar {
         :my $*ALLOW_CODE := 0;
         '=' <!before begin || end || for || END>
         $<type> = <identifier>
+        [ \h+ <colonpair> ]?
         \s
         $<pod_content> = <pod_textcontent>?
     }
 
     token pod_block:sym<abbreviated_raw> {
-        ^^ \h* '=' $<type>=[ 'code' || 'comment' ] \s
+        ^^ \h* '=' $<type>=[ 'code' || 'comment' ]
+        [ \h+ <colonpair> ]?\s
         $<pod_content> = [ \h* <!before '=' \w> \N+ \n ]*
     }
 
     token pod_block:sym<abbreviated_table> {
-        ^^ \h* '=table' <pod_newline>
+        ^^ \h* '=table' [ \h+ <colonpair> ]? <pod_newline>
         [ <!before \h* \n> <table_row>]*
     }
 
@@ -295,6 +320,8 @@ grammar Perl6::Grammar is HLL::Grammar {
         'pod' <!before \w> || 'item' \d* <!before \w>
         # TODO: Also Semantic blocks one day
     }
+
+    token install_doc_phaser { <?> }
 
     ## Top-level rules
 
@@ -319,6 +346,7 @@ grammar Perl6::Grammar is HLL::Grammar {
         :my $*TYPENAME := '';
         :my $*VMARGIN    := 0;                     # pod stuff
         :my $*ALLOW_CODE := 0;                     # pod stuff
+        :my $*POD_IN_FORMATTINGCODE := 0;          # pod stuff
         
         # Various interesting scopes we'd like to keep to hand.
         :my $*GLOBALish;
@@ -388,6 +416,8 @@ grammar Perl6::Grammar is HLL::Grammar {
         
         <.finishpad>
         <statementlist>
+
+        <.install_doc_phaser>
         
         [ $ || <.panic: 'Confused'> ]
         
@@ -427,6 +457,7 @@ grammar Perl6::Grammar is HLL::Grammar {
 
     token statement {
         :my $*QSIGIL := '';
+        :my $*SCOPE := '';
         <!before <[\])}]> | $ >
         [
         | <statement_control>
@@ -580,17 +611,36 @@ grammar Perl6::Grammar is HLL::Grammar {
         | <version>
         | <module_name>
         ] ** ','
+        {
+            for $<module_name> {
+                $*ST.load_module(~$_<longname>, $*GLOBALish);
+            }
+        }
     }
 
     token statement_control:sym<import> {
         <sym> <.ws>
         <module_name> [ <.spacey> <arglist> ]? <.ws>
+        {
+            my @name := parse_name(~$<module_name><longname>);
+            my $module;
+            my $found := 0;
+            try { $module := $*ST.find_symbol(@name); $found := 1; }
+            if $found {
+                do_import($module.WHO, $<arglist>);
+            }
+            else {
+                $/.CURSOR.panic("Could not find module " ~ ~$<module_name> ~
+                    " to import symbols from");
+            }
+        }
     }
 
     token statement_control:sym<use> {
         :my $longname;
         :my $*IN_DECL := 'use';
-        :my $*SCOPE := 'use';
+        :my $*SCOPE   := 'use';
+        $<doc>=[ 'DOC' \h+ ]?
         <sym> <.ws>
         [
         | <version>
@@ -616,20 +666,27 @@ grammar Perl6::Grammar is HLL::Grammar {
                     $/.CURSOR.panic("arglist case of use not yet implemented");
                 }
             || { 
-                    if $longname {
-                        my $module := $*ST.load_module(~$longname, $*GLOBALish);
-                        if pir::exists($module, 'EXPORT') {
-                            my $EXPORT := $module<EXPORT>.WHO;
-                            if pir::exists($EXPORT, 'DEFAULT') {
-                                $*ST.import($EXPORT<DEFAULT>);
-                            }
+                    unless ~$<doc> && !%*COMPILING<%?OPTIONS><doc> {
+                        if $longname {
+                            my $module := $*ST.load_module(~$longname,
+                                                           $*GLOBALish);
+                            do_import($module, $<arglist>);
+                            $/.CURSOR.import_EXPORTHOW($module);
                         }
-                        $/.CURSOR.import_EXPORTHOW($module);
                     }
                 }
             ]
         ]
         <.ws>
+    }
+    
+    sub do_import($module, $arglist) {
+        if pir::exists($module, 'EXPORT') {
+            my $EXPORT := $module<EXPORT>.WHO;
+            if pir::exists($EXPORT, 'DEFAULT') {
+                $*ST.import($EXPORT<DEFAULT>);
+            }
+        }
     }
 
     rule statement_control:sym<require> {
@@ -987,12 +1044,12 @@ grammar Perl6::Grammar is HLL::Grammar {
     token sigil { <[$@%&]> }
 
     proto token twigil { <...> }
-    token twigil:sym<.> { <sym> }
-    token twigil:sym<!> { <sym> }
+    token twigil:sym<.> { <sym> <?before \w> }
+    token twigil:sym<!> { <sym> <?before \w> }
     token twigil:sym<^> { <sym> <?before \w> }
     token twigil:sym<:> { <sym> <?before \w> }
-    token twigil:sym<*> { <sym> }
-    token twigil:sym<?> { <sym> }
+    token twigil:sym<*> { <sym> <?before \w> }
+    token twigil:sym<?> { <sym> <?before \w> }
     token twigil:sym<=> { <sym> <?before \w> }
 
     proto token package_declarator { <...> }
@@ -1074,38 +1131,62 @@ grammar Perl6::Grammar is HLL::Grammar {
             <trait>*
             
             {
-                # Locate any existing symbol. Note that it's only a match
-                # with "my" if we already have a declaration in this scope.
-                my $exists := 0;
-                if $longname {
-                    my @name := parse_name(~$longname<name>);
-                    if $*ST.already_declared($*SCOPE, $*OUTERPACKAGE, $outer, @name) {
-                        $*PACKAGE := $*ST.find_symbol(@name);
-                        $exists := 1;
+                # Unless we're augmenting...
+                if $*SCOPE ne 'augment' {
+                    # Locate any existing symbol. Note that it's only a match
+                    # with "my" if we already have a declaration in this scope.
+                    my $exists := 0;
+                    if $longname {
+                        my @name := parse_name(~$longname<name>);
+                        if $*ST.already_declared($*SCOPE, $*OUTERPACKAGE, $outer, @name) {
+                            $*PACKAGE := $*ST.find_symbol(@name);
+                            $exists := 1;
+                        }
                     }
-                }
-                
-                # If it exists already, then it's either uncomposed (in which
-                # case we just stubbed it) or else an illegal redecl.
-                if $exists {
-                    if $*PACKAGE.HOW.is_composed($*PACKAGE) {
-                        $/.CURSOR.panic("Illegal redeclaration of $*PKGDECL '" ~
-                            ~$longname<name> ~ "'");
+                    
+                    # If it exists already, then it's either uncomposed (in which
+                    # case we just stubbed it) or else an illegal redecl.
+                    if $exists {
+                        if $*PACKAGE.HOW.is_composed($*PACKAGE) {
+                            $/.CURSOR.panic("Illegal redeclaration of $*PKGDECL '" ~
+                                ~$longname<name> ~ "'");
+                        }
+                    }
+                    else {
+                        # Construct meta-object for this package.
+                        my %args;
+                        if $longname {
+                            %args<name> := ~$longname<name>;
+                        }
+                        %args<repr> := $*REPR;
+                        $*PACKAGE := $*ST.pkg_create_mo(%*HOW{$*PKGDECL}, |%args);
+                        
+                        # Install it in the symbol table if needed.
+                        if $longname {
+                            $*ST.install_package_longname($/, $longname, $*SCOPE,
+                                $*PKGDECL, $*OUTERPACKAGE, $outer, $*PACKAGE);
+                        }
                     }
                 }
                 else {
-                    # Construct meta-object for this package.
-                    my %args;
-                    if $longname {
-                        %args<name> := ~$longname<name>;
+                    # Augment. Ensure we can.
+                    unless $*MONKEY_TYPING {
+                        $/.CURSOR.panic("augment not allowed without 'use MONKEY_TYPING'");
                     }
-                    %args<repr> := $*REPR;
-                    $*PACKAGE := $*ST.pkg_create_mo(%*HOW{$*PKGDECL}, |%args);
+                    if $*PKGDECL eq 'role' {
+                        $/.CURSOR.panic("Can not augment a role, since roles are immutable");
+                    }
+                    unless $longname {
+                        $/.CURSOR.panic("Can not augment the anonymous");
+                    }
                     
-                    # Install it in the symbol table if needed.
-                    if $longname {
-                        $*ST.install_package($/, $longname, $*SCOPE, $*PKGDECL,
-                            $*OUTERPACKAGE, $outer, $*PACKAGE);
+                    # Locate type.
+                    my $found;
+                    my @name := parse_name(~$longname<name>);
+                    try { $*PACKAGE := $*ST.find_symbol(@name); $found := 1 }
+                    unless $found {
+                        $/.CURSOR.panic("Could not find a $*PKGDECL " ~
+                            ~$longname<name> ~ " to augment");
                     }
                 }
                 
@@ -1800,6 +1881,9 @@ grammar Perl6::Grammar is HLL::Grammar {
     token quote:sym<s> {
         <sym> (s)? >>
         :my %*RX;
+        {
+            %*RX<s> := 1 if $/[0]
+        }
         <rx_adverbs>
         [
         | '/' <p6regex=.LANG('Regex','nibbler')> <?[/]> <quote_EXPR: ':qq'> <.old_rx_mods>?

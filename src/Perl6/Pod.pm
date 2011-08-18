@@ -1,10 +1,19 @@
 # various helper methods for Pod parsing and processing
 class Perl6::Pod {
     our sub document($what, $with) {
-        unless %*COMPILING<%?OPTIONS><setting> eq 'NULL' {
+        if $with ne '' {
             my $true := $*ST.add_constant('Int', 'int', 1)<compile_time_value>;
             my $doc  := $*ST.add_constant('Str', 'str', $with)<compile_time_value>;
             $*ST.apply_trait('&trait_mod:<is>', $what, $doc, :docs($true));
+
+            # add it to $=POD
+            my $cont  := serialize_array([$doc])<compile_time_value>;
+            my $block := $*ST.add_constant(
+                'Pod::Block::Declarator', 'type_new',
+                :nocache,
+                :WHEREFORE($what), :content($cont),
+            );
+            $*POD_BLOCKS.push($block<compile_time_value>);
         }
     }
 
@@ -29,7 +38,7 @@ class Perl6::Pod {
 
         my $content := serialize_array(@children);
         if $leveled {
-            my $level      := nqp::substr($<type>.Str, 4);
+            my $level := nqp::substr($<type>.Str, 4);
             my $level_past;
             if $level ne '' {
                 $level_past := $*ST.add_constant(
@@ -170,6 +179,8 @@ class Perl6::Pod {
     }
 
     our sub process_rows(@rows) {
+        # remove trailing blank lines
+        @rows.pop while @rows[+@rows - 1] ~~ /^ \s* $/;
         # find the longest leading whitespace and strip it
         # from every row, also remove trailing \n
         my $w := -1; # the longest leading whitespace
@@ -237,6 +248,52 @@ class Perl6::Pod {
         }
         return @result;
     }
+
+    our sub merge_twines(@twines) {
+        my @ret := @twines.shift.ast;
+        for @twines {
+            my @cur   := $_.ast;
+            @ret.push(
+                $*ST.add_constant(
+                    'Str', 'str',
+                    nqp::unbox_s(@ret.pop) ~ ' ' ~ nqp::unbox_s(@cur.shift)
+                )<compile_time_value>,
+            );
+            nqp::splice(@ret, @cur, +@ret, 0);
+        }
+        return @ret;
+    }
+
+    our sub build_pod_string(@content) {
+        sub push_strings(@strings, @where) {
+            my $s := subst(pir::join('', @strings), /\s+/, ' ', :global);
+            my $t := $*ST.add_constant(
+                'Str', 'str', $s
+            )<compile_time_value>;
+            @where.push($t);
+        }
+
+        my @res  := [];
+        my @strs := [];
+        for @content -> $elem {
+            if pir::typeof($elem) eq 'String' {
+                # don't push the leading whitespace
+                if +@res + @strs == 0 && $elem eq ' ' {
+
+                } else {
+                    @strs.push($elem);
+                }
+            } else {
+                push_strings(@strs, @res);
+                @strs := [];
+                @res.push($elem);
+            }
+        }
+        push_strings(@strs, @res);
+
+        return @res;
+    }
+
 
     # takes an array of strings (rows of a table)
     # returns array of arrays of strings (cells)

@@ -38,8 +38,10 @@ multi trait_mod:<is>(Parameter:D $param, :$copy!) {
 # full-blown serialization, though.
 multi trait_mod:<is>(Routine:D \$r, :$export!) {
     if %*COMPILING {
+        my $to_export := $r.multi ?? $r.dispatcher !! $r;
         my @tags = 'ALL', 'DEFAULT';
         for @tags -> $tag {
+            my $exp_name := '&' ~ $r.name;
             my $install_in;
             if $*EXPORT.WHO.exists($tag) {
                 $install_in := $*EXPORT.WHO.{$tag};
@@ -49,21 +51,26 @@ multi trait_mod:<is>(Routine:D \$r, :$export!) {
                 $*ST.pkg_compose($install_in);
                 $*ST.install_package_symbol($*EXPORT, $tag, $install_in);
             }
-            $*ST.install_package_symbol($install_in, '&' ~ $r.name, $r);
+            if $install_in.WHO.exists($exp_name) {
+                unless ($install_in.WHO){$exp_name} =:= $to_export {
+                    die "A symbol $exp_name has already been exported";
+                }
+            }
+            $*ST.install_package_symbol($install_in, $exp_name, $to_export);
         }
     }
 }
 
-multi trait_mod:<is>(Any:D $docee, Mu:D $doc, :$docs!) {
+multi trait_mod:<is>(Mu:D $docee, $doc, :$docs!) {
     $docee does role {
         has $!WHY;
         method WHY          { $!WHY      }
-        method set_docs($d) { $!WHY = $d ne '' ?? $d !! Any }
+        method set_docs($d) { $!WHY = $d }
     }
     $docee.set_docs($doc);
 }
 
-multi trait_mod:<is>(Any:U $docee, Mu:D $doc, :$docs!) {
+multi trait_mod:<is>(Mu:U $docee, $doc, :$docs!) {
     $docee.HOW.set_docs($doc);
 }
 
@@ -90,6 +97,68 @@ multi trait_mod:<returns>(Routine:D $target, Mu:U $type) {
 proto trait_mod:<as>(|$) { * }
 multi trait_mod:<as>(Parameter:D $param, $type) {
     $param.set_coercion($type);
+}
+
+my class Pair { ... }
+proto trait_mod:<handles>(|$) { * }
+multi trait_mod:<handles>(Attribute:D $target, $thunk) {
+    $target does role {
+        has $.handles;
+        
+        method set_handles($expr) {
+            $!handles := $expr;
+        }
+        
+        method add_delegator_method($attr: $pkg, $meth_name, $call_name) {
+            my $meth := method (**@pos, *%named) is rw {
+                $attr.get_value(self)."$call_name"(|@pos, |%named)
+            };
+            $meth.set_name($meth_name);
+            $pkg.HOW.add_method($pkg, $meth_name, $meth);
+        }
+        
+        method apply_handles($attr: Mu $pkg) {
+            sub applier($expr) {
+                if $expr.defined() {
+                    if $expr ~~ Str {
+                        self.add_delegator_method($pkg, $expr, $expr);
+                    }
+                    elsif $expr ~~ Pair {
+                        self.add_delegator_method($pkg, $expr.key, $expr.value);
+                    }
+                    elsif $expr ~~ Positional {
+                        for $expr.list {
+                            applier($_);
+                        }
+                    }
+                    else {
+                        $pkg.HOW.add_fallback($pkg,
+                            -> $obj, $name {
+                                ?($name ~~ $expr)
+                            },
+                            -> $obj, $name {
+                                -> $self, **@pos, *%named {
+                                    $attr.get_value($self)."$name"(|@pos, |%named)
+                                }
+                            });
+                    }
+                }
+                else {
+                    $pkg.HOW.add_fallback($pkg,
+                        -> $obj, $name {
+                            ?$expr.can($name)
+                        },
+                        -> $obj, $name {
+                            -> $self, **@pos, *%named {
+                                $attr.get_value($self)."$name"(|@pos, |%named)
+                            }
+                        });
+                }
+            }
+            applier($!handles);
+        }
+    };
+    $target.set_handles($thunk());
 }
 
 proto trait_mod:<will>(|$) { * }

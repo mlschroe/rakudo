@@ -8,7 +8,8 @@ Makefile
 *.patch
 *.pdb
 *.res
-Test.pir
+lib/Test.pir
+lib/Pod/To/Text.pir
 CORE.setting.pbc
 perl6
 perl6.pbc

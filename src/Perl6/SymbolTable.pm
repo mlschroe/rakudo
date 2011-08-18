@@ -22,6 +22,7 @@ my $SIG_ELEM_IS_CAPTURE          := 32768;
 my $SIG_ELEM_UNDEFINED_ONLY      := 65536;
 my $SIG_ELEM_DEFINED_ONLY        := 131072;
 my $SIG_ELEM_METHOD_SLURPY_NAMED := 262144;
+my $SIG_ELEM_NOMINAL_GENERIC     := 524288;
 
 # This builds upon the SerializationContextBuilder to add the specifics
 # needed by Rakudo Perl 6.
@@ -143,10 +144,8 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
                         := Perl6::ModuleLoader.load_setting($setting_name);
             
             # Do load in code.
-            my $fixup := PAST::Stmts.new(
-                PAST::Op.new(
-                    :pirop('load_bytecode vs'), 'blib/Perl6/ModuleLoader.pbc'
-                ),
+            my $fixup := PAST::Stmt.new(
+                self.perl6_module_loader_code(),
                 PAST::Op.new(
                     :pasttype('callmethod'), :name('set_outer_ctx'),
                     PAST::Val.new( :value($*UNIT_OUTER) ),
@@ -171,9 +170,7 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         
         # Make sure we do the loading during deserialization.
         self.add_event(:deserialize_past(PAST::Stmts.new(
-            PAST::Op.new(
-                :pirop('load_bytecode vs'), 'blib/Perl6/ModuleLoader.pbc'
-            ),
+            self.perl6_module_loader_code(),
             PAST::Op.new(
                :pasttype('callmethod'), :name('load_module'),
                PAST::Var.new( :name('ModuleLoader'), :namespace([]), :scope('package') ),
@@ -182,6 +179,27 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
             ))));
             
         return pir::getattribute__PPs($module, 'lex_pad');
+    }
+    
+    # Uses the NQP module loader to load Perl6::ModuleLoader, which
+    # is a normal NQP module.
+    method perl6_module_loader_code() {
+        PAST::Stmt.new(
+            PAST::Op.new(
+                :pirop('load_bytecode vs'), 'ModuleLoader.pbc'
+            ),
+            PAST::Op.new(
+                :pasttype('callmethod'), :name('load_module'),
+                PAST::Var.new( :scope('keyed_int'),
+                    PAST::Var.new( :scope('keyed'),
+                        PAST::Var.new( :scope('keyed'),
+                            PAST::Op.new( :pirop('get_root_namespace P') ),
+                            'nqp' ),
+                        'ModuleLoader'),
+                    1),
+                'Perl6::ModuleLoader',
+                self.get_slot_past_for_object($*ST.pkg_create_mo(pir::get_knowhow__P()))
+            ))
     }
     
     # Implements a basic first cut of import. Works out what needs to
@@ -227,25 +245,68 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         1;
     }
     
-    # Factors out deciding where to install package-y things.
-    method install_package($/, $longname, $scope, $pkgdecl, $package, $outer, $symbol) {
-        if $scope eq 'my' {
-            if +$longname<name><morename> == 0 {
-                self.install_lexical_symbol($outer, ~$longname<name>, $symbol);
-            }
-            else {
-                $/.CURSOR.panic("Cannot use multi-part package name with 'my' scope");
-            }
-        }
-        elsif $scope eq 'our' {
-            self.install_package_symbol($package, ~$longname<name>, $symbol);
-            if +$longname<name><morename> == 0 {
-                self.install_lexical_symbol($outer, ~$longname<name>, $symbol);
-            }
-        }
-        else {
+    # Factors out installation of package-y things, based on a longname.
+    method install_package_longname($/, $longname, $scope, $pkgdecl, $package, $outer, $symbol) {
+        my @name := pir::split('::', ~$longname);
+        my @adv  := pir::split(':', @name[+@name - 1]);
+        @name[+@name - 1] := @adv[0];
+        self.install_package($/, @name, $scope, $pkgdecl, $package, $outer, $symbol)
+    }
+    
+    # Installs something package-y in the right place, creating the nested
+    # pacakges as needed.
+    method install_package($/, @name_orig, $scope, $pkgdecl, $package, $outer, $symbol) {
+        my @parts := pir::clone(@name_orig);
+        my $name  := @parts.pop();
+        my $create_scope := $scope;
+        my $cur_pkg := $package;
+        my $cur_lex := $outer;
+        
+        # Can only install packages as our or my scope.
+        unless $create_scope eq 'my' || $create_scope eq 'our' {
             $/.CURSOR.panic("Cannot use $*SCOPE scope with $pkgdecl");
         }
+        
+        # If we have a multi-part name, see if we know the opening
+        # chunk already. If so, use it for that part of the name.
+        if +@parts {
+            try {
+                $cur_pkg := $*ST.find_symbol([@parts[0]]);
+                $cur_lex := 0;
+                $create_scope := 'our';
+                @parts.shift();
+            }
+        }
+        
+        # Chase down the name, creating stub packages as needed.
+        while +@parts {
+            my $part := @parts.shift;
+            if pir::exists($cur_pkg.WHO, $part) {
+                $cur_pkg := ($cur_pkg.WHO){$part};
+            }
+            else {
+                my $new_pkg := self.pkg_create_mo(%*HOW<package>, :name($part));
+                self.pkg_compose($new_pkg);
+                if $create_scope eq 'my' || $cur_lex {
+                    self.install_lexical_symbol($cur_lex, $part, $new_pkg);
+                }
+                if $create_scope eq 'our' {
+                    self.install_package_symbol($cur_pkg, $part, $new_pkg);
+                }
+                $cur_pkg := $new_pkg;
+                $create_scope := 'our';
+                $cur_lex := 0;
+            }
+        }
+        
+        # Install final part of the symbol.
+        if $create_scope eq 'my' || $cur_lex {
+            self.install_lexical_symbol($cur_lex, $name, $symbol);
+        }
+        if $create_scope eq 'our' {
+            self.install_package_symbol($cur_pkg, $name, $symbol);
+        }
+        
         1;
     }
     
@@ -358,30 +419,20 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
     
     # Installs a symbol into the package. Does so immediately, and
     # makes sure this happens on deserialization also.
-    method install_package_symbol($package, $symbol, $obj) {
-        my @sym := pir::split('::', $symbol);
-        my $name := ~@sym.pop();
-        
+    method install_package_symbol($package, $name, $obj) {
         # Install symbol immediately.
-        my $target := $package;
-        for @sym {
-            $target := pir::perl6_get_package_through_who__PPs($target, $_);
-        }
-        ($target.WHO){$name} := $obj;
+        ($package.WHO){$name} := $obj;
         
         # Add deserialization installation of the symbol.
-        my $path := self.get_slot_past_for_object($package);
-        for @sym {
-            $path := PAST::Op.new(:pirop('perl6_get_package_through_who PPs'), $path, ~$_);
-        }
+        my $package_ref := self.get_object_sc_ref_past($package);
         self.add_event(:deserialize_past(PAST::Op.new(
             :pasttype('bind_6model'),
             PAST::Var.new(
                 :scope('keyed'),
-                PAST::Op.new( :pirop('get_who PP'), $path ),
-                $name
+                PAST::Op.new( :pirop('get_who PP'), $package_ref ),
+                ~$name
             ),
-            self.get_slot_past_for_object($obj)
+            self.get_object_sc_ref_past($obj)
         )));
         1;
     }
@@ -394,19 +445,27 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         my $slot      := self.add_object($parameter);
         
         # Create PAST to make it when deserializing.
-        my $set_attrs := PAST::Stmts.new();
+        my $obj_reg := PAST::Var.new( :name('$P0'), :scope('register') );
+        my $class_reg := PAST::Var.new( :name('$P1'), :scope('register') );
+        my $set_attrs := PAST::Stmts.new( );
         self.add_event(:deserialize_past(PAST::Stmts.new(
-            self.set_slot_past($slot, self.set_cur_sc(PAST::Op.new(
-                :pirop('repr_instance_of PP'),
+            PAST::Op.new(
+                :pasttype('bind'), $class_reg,
                 self.get_object_sc_ref_past($par_type)
-            ))),
+            ),
+            self.set_slot_past($slot, self.set_cur_sc(PAST::Op.new(
+                :pasttype('bind_6model'), $obj_reg,
+                PAST::Op.new(
+                    :pirop('repr_instance_of PP'),
+                    $class_reg
+                )))),
             $set_attrs
         )));
         
         # Set name if there is one.
         if pir::exists(%param_info, 'variable_name') {
             pir::repr_bind_attr_str__vPPsS($parameter, $par_type, '$!variable_name', %param_info<variable_name>);
-            $set_attrs.push(self.set_attribute_typed($parameter, $par_type,
+            $set_attrs.push(self.set_attribute_typed($obj_reg, $class_reg,
                 '$!variable_name', %param_info<variable_name>, str));
         }
         
@@ -465,8 +524,11 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         if %param_info<default_from_outer> {
             $flags := $flags + $SIG_ELEM_DEFAULT_FROM_OUTER;
         }
+        if %param_info<nominal_generic> {
+            $flags := $flags + $SIG_ELEM_NOMINAL_GENERIC;
+        }
         pir::repr_bind_attr_int__vPPsI($parameter, $par_type, '$!flags', $flags);
-        $set_attrs.push(self.set_attribute_typed($parameter, $par_type,
+        $set_attrs.push(self.set_attribute_typed($obj_reg, $class_reg,
             '$!flags', $flags, int));
         
         # Set named names up, for named parameters.
@@ -580,7 +642,19 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
             my $p6_pns := $rns{'perl6'};
             $p6_pns{'GLOBAL'} := $*GLOBALish;
             unless $precomp {
+                # Compile the block.
                 $precomp := self.compile_in_context($code_past, $code_type);
+
+                # Also compile the candidates if this is a proto.
+                if $is_dispatcher {
+                    for nqp::getattr($code, $code_type, '$!dispatchees') {
+                        my $stub := nqp::getattr($_, $code_type, '$!do');
+                        my $past := pir::getprop__PsP('PAST_BLOCK', $stub);
+                        if $past {
+                            self.compile_in_context($past, $code_type);
+                        }
+                    }
+                }
             }
             $precomp(|@pos, |%named);
         };
@@ -615,6 +689,9 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
                         self.get_object_sc_ref_past($clone)
                     )));
             });
+			
+			# Attach the PAST block to the stub.
+			pir::setprop__vPsP($stub, 'PAST_BLOCK', $code_past);
         }
         
         # Desserialization should do the actual creation and just put the right
@@ -697,12 +774,20 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         my $slot    := self.add_object($cd);
         
         # Create PAST to make it when deserializing.
+        my $obj_reg := PAST::Var.new( :name('$P0'), :scope('register') );
+        my $class_reg := PAST::Var.new( :name('$P1'), :scope('register') );
         my $set_attrs := PAST::Stmts.new();
         self.add_event(:deserialize_past(PAST::Stmts.new(
-            self.set_slot_past($slot, self.set_cur_sc(PAST::Op.new(
-                :pirop('repr_instance_of PP'),
+            PAST::Op.new(
+                :pasttype('bind'), $class_reg,
                 self.get_object_sc_ref_past($cd_type)
-            ))),
+            ),
+            self.set_slot_past($slot, self.set_cur_sc(PAST::Op.new(
+                :pasttype('bind'), $obj_reg,
+                PAST::Op.new(
+                    :pirop('repr_instance_of PP'),
+                    $class_reg
+                )))),
             $set_attrs
         )));
         
@@ -711,9 +796,9 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         $set_attrs.push(self.set_attribute($cd, $cd_type, '$!of',
             self.get_object_sc_ref_past($of)));
         pir::repr_bind_attr_int__vPPsI($cd, $cd_type, '$!rw', $rw);
-        $set_attrs.push(self.set_attribute_typed($cd, $cd_type, '$!rw', $rw, int));
+        $set_attrs.push(self.set_attribute_typed($obj_reg, $class_reg, '$!rw', $rw, int));
         pir::repr_bind_attr_str__vPPsS($cd, $cd_type, '$!name', $name);
-        $set_attrs.push(self.set_attribute_typed($cd, $cd_type, '$!name', $name, str));
+        $set_attrs.push(self.set_attribute_typed($obj_reg, $class_reg, '$!name', $name, str));
         
         $cd
     }
@@ -736,14 +821,13 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
     
     # Helper to make PAST for setting a typed attribute to a value. Value should
     # be a PAST tree.
-    method set_attribute_typed($obj, $class, $name, $value_past, $type) {
+    method set_attribute_typed($obj_reg, $class_reg, $name, $value_past, $type) {
         PAST::Stmt.new(
             PAST::Op.new(
                 :pasttype('bind_6model'),
                 PAST::Var.new(
                     :name($name), :scope('attribute_6model'), :type($type),
-                    self.get_object_sc_ref_past($obj), 
-                    self.get_object_sc_ref_past($class)
+                    $obj_reg, $class_reg
                 ),
                 $value_past
             )
@@ -831,22 +915,25 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
     
     # Adds a constant value to the constants table. Returns PAST to do
     # the lookup of the constant.
-    method add_constant($type, $primitive, *@value, *%named) {
+    method add_constant($type, $primitive, :$nocache, *@value, *%named) {
         # If we already built this, find it in the cache and
         # just return that.
-        my $namedkey := '';
-        for %named {
-            $namedkey := $namedkey ~ $_.key ~ ',' ~ $_.value ~ ';'
-                if pir::defined($_.value);
-        }
-        my $cache_key := "$type,$primitive,"
-                         ~ pir::join(',', @value)
-                         ~ $namedkey;
-        if pir::exists(%!const_cache, $cache_key) {
-            my $past := self.get_slot_past_for_object(%!const_cache{$cache_key});
-            $past<has_compile_time_value> := 1;
-            $past<compile_time_value> := %!const_cache{$cache_key};
-            return $past;
+        my $cache_key;
+        if !$nocache {
+            my $namedkey := '';
+            for %named {
+                $namedkey := $namedkey ~ $_.key ~ ',' ~ $_.value ~ ';'
+                    if pir::defined($_.value);
+            }
+            $cache_key := "$type,$primitive,"
+                ~ pir::join(',', @value)
+                ~ $namedkey;
+            if pir::exists(%!const_cache, $cache_key) {
+                my $past := self.get_slot_past_for_object(%!const_cache{$cache_key});
+                $past<has_compile_time_value> := 1;
+                $past<compile_time_value> := %!const_cache{$cache_key};
+                return $past;
+            }
         }
         
         # Find type object for the box typed we'll create.
@@ -899,7 +986,9 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         my $past := self.get_slot_past_for_object($constant);
         $past<has_compile_time_value> := 1;
         $past<compile_time_value> := $constant;
-        %!const_cache{$cache_key} := $constant;
+        if !$nocache {
+            %!const_cache{$cache_key} := $constant;
+        }
         return $past;
     }
     
@@ -1243,7 +1332,7 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         }
     }
     
-    # Checks if a given symbol is declared and also a type object.
+    # Checks if a given symbol is declared.
     method is_name(@name) {
         my $is_name := 0;
         try {
@@ -1257,9 +1346,9 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
     # Checks if a symbol has already been declared in the current
     # scope, and thus may not be redeclared.
     method already_declared($scope, $curpackage, $curpad, @name) {
-        if $scope eq 'my' {
+        if $scope eq 'my' && +@name == 1 {
             my %sym := $curpad.symbol(@name[0]);
-            if %sym { %sym<value>;
+            if %sym {
                 return %sym<value>.HOW.HOW.name(%sym<value>.HOW) ne 'Perl6::Metamodel::PackageHOW';
             }
             return 0;
@@ -1298,12 +1387,12 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
     method find_symbol(@name) {
         # Make sure it's not an empty name.
         unless +@name { pir::die("Cannot look up empty name"); }
-        
+
         # GLOBAL is current view of global.
         if +@name == 1 && @name[0] eq 'GLOBAL' {
             return $*GLOBALish;
         }
-        
+
         # If it's a single-part name, look through the lexical
         # scopes.
         if +@name == 1 {
