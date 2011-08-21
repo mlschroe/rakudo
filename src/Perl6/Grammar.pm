@@ -1408,8 +1408,7 @@ grammar Perl6::Grammar is HLL::Grammar {
     token routine_declarator:sym<submethod>
         { <sym> <.end_keyword> <method_def('submethod')> }
     token routine_declarator:sym<macro>
-        { <sym> <.end_keyword>
-          <.panic: "Macros are not yet implemented"> }
+        { <sym> <.end_keyword> <macro_def()> }
 
     rule routine_def($d) {
         :my $*IN_DECL := $d;
@@ -1447,6 +1446,22 @@ grammar Perl6::Grammar is HLL::Grammar {
             | <blockoid>
             ]
         ] || <.panic: 'Malformed method'>
+    }
+
+    rule macro_def() {
+        :my $*IN_DECL := 'macro';
+        :my $*METHODTYPE;
+        :my $*DOC := $*DECLARATOR_DOCS;
+        { $*DECLARATOR_DOCS := '' }
+        <deflongname>?
+        <.newpad>
+        [ '(' <multisig> ')' ]?
+        <trait>*
+        { $*IN_DECL := ''; $*IMPLICIT := 0; }
+        # XXX: Should be an alternation with <onlystar> here, but it's
+        #      going to be messy to refactor and we don't want to get
+        #      into it now.
+        <blockoid>
     }
     
     token onlystar {
@@ -1979,6 +1994,10 @@ grammar Perl6::Grammar is HLL::Grammar {
             elsif $m eq 'e' { $/.CURSOR.obs('/e','interpolated {...} or s{} = ... form'); }
             else            { $/.CURSOR.obs('suffix regex modifiers','prefix adverbs');   }
         }
+    }
+
+    token quote:sym<quasi> {
+        <sym> <.ws> <!before '('> <block>
     }
 
     token quote_escape:sym<$> {

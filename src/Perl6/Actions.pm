@@ -1518,6 +1518,84 @@ class Perl6::Actions is HLL::Actions {
         make $closure;
     }
 
+    method macro_def($/) {
+        my $block;
+
+        $block := $<blockoid>.ast;
+        $block.blocktype('declaration');
+
+        # Obtain parameters, create signature object and generate code to
+        # call binder.
+        if $block<placeholder_sig> && $<multisig> {
+            $/.CURSOR.panic('Placeholder variable cannot override existing signature');
+        }
+        my @params :=
+                $<multisig>             ?? $<multisig>[0].ast      !!
+                $block<placeholder_sig> ?? $block<placeholder_sig> !!
+                [];
+        set_default_parameter_type(@params, 'Any');
+        my $signature := create_signature_object(@params, $block);
+        add_signature_binding_code($block, $signature, @params);
+
+        # Create code object.
+        if $<deflongname> {
+            $block.name(~$<deflongname>[0].ast);
+            $block.nsentry('');
+        }
+        my $code := $*ST.create_code_object($block, 'Macro', $signature,
+            $*MULTINESS eq 'proto');
+
+        # Document it
+        Perl6::Pod::document($code, $*DOC);
+
+        # Install PAST block so that it gets capture_lex'd correctly and also
+        # install it in the lexpad.
+        my $outer := $*ST.cur_lexpad();
+        $outer[0].push(PAST::Stmt.new($block));
+
+        # Install &?ROUTINE.
+        $*ST.install_lexical_symbol($block, '&?ROUTINE', $code);
+
+        my $past;
+        if $<deflongname> {
+            my $name := '&' ~ ~$<deflongname>[0].ast;
+            # Install.
+            if $outer.symbol($name) {
+                $/.CURSOR.panic("Illegal redeclaration of macro '" ~
+                    ~$<deflongname>[0].ast ~ "'");
+            }
+            if $*SCOPE eq '' || $*SCOPE eq 'my' {
+                $*ST.install_lexical_symbol($outer, $name, $code);
+            }
+            elsif $*SCOPE eq 'our' {
+                # Install in lexpad and in package, and set up code to
+                # re-bind it per invocation of its outer.
+                $*ST.install_lexical_symbol($outer, $name, $code);
+                $*ST.install_package_symbol($*PACKAGE, $name, $code);
+                $outer[0].push(PAST::Op.new(
+                    :pasttype('bind_6model'),
+                    $*ST.symbol_lookup([$name], $/, :package_only(1)),
+                    PAST::Var.new( :name($name), :scope('lexical_6model') )
+                ));
+            }
+            else {
+                $/.CURSOR.panic("Cannot use '$*SCOPE' scope with a macro");
+            }
+        }
+        elsif $*MULTINESS {
+            $/.CURSOR.panic('Cannot put ' ~ $*MULTINESS ~ ' on anonymous macro');
+        }
+
+        # Apply traits.
+        for $<trait> {
+            if $_.ast { ($_.ast)($code) }
+        }
+
+        my $closure := block_closure(reference_to_code_object($code, $past));
+        $closure<sink_past> := PAST::Op.new( :pasttype('null') );
+        make $closure;
+    }
+
     sub methodize_block($/, $past, @params, $invocant_type, $code_type) {
         # Get signature and ensure it has an invocant and *%_.
         if $past<placeholder_sig> {
@@ -2444,9 +2522,52 @@ class Perl6::Actions is HLL::Actions {
     }
 
     method term:sym<identifier>($/) {
-        my $past := capture_or_parcel($<args>.ast, ~$<identifier>);
-        $past.name('&' ~ $<identifier>);
-        make $past;
+        my $is_macro := 0;
+        my $routine;
+        try {
+            $routine := $*ST.find_symbol(['&' ~ ~$<identifier>]);
+            if nqp::istype($routine, $*ST.find_symbol(['Macro'])) {
+                $is_macro := 1;
+            }
+        }
+        if $is_macro {
+            my $ast_class := $*ST.find_symbol(['AST']);
+            my @argument_quasi_asts := [];
+            if $<args><semiarglist> {
+                for $<args><semiarglist><arglist> {
+                    if $_<EXPR> {
+                        my $expr := $_<EXPR>.ast;
+                        add_macro_arguments($expr, $ast_class, @argument_quasi_asts);
+                    }
+                }
+            }
+            my $quasi_ast := $routine(|@argument_quasi_asts);
+            unless nqp::istype($quasi_ast, $ast_class) {
+                # XXX: Need to awesomeize with which type it got
+                $/.CURSOR.panic('Macro did not return AST');
+            }
+            make nqp::getattr($quasi_ast, $ast_class, '$!past');
+        }
+        else {
+            my $past := capture_or_parcel($<args>.ast, ~$<identifier>);
+            $past.name('&' ~ $<identifier>);
+            make $past;
+        }
+    }
+
+    sub add_macro_arguments($expr, $ast_class, @argument_quasi_asts) {
+        if $expr.name eq '&infix:<,>' {
+            for $expr.list {
+                my $quasi_ast := $ast_class.new();
+                nqp::bindattr($quasi_ast, $ast_class, '$!past', $_);
+                @argument_quasi_asts.push($quasi_ast);
+            }
+        }
+        else {
+            my $quasi_ast := $ast_class.new();
+            nqp::bindattr($quasi_ast, $ast_class, '$!past', $expr);
+            @argument_quasi_asts.push($quasi_ast);
+        }
     }
 
     method is_indirect_lookup($longname) {
@@ -2485,8 +2606,8 @@ class Perl6::Actions is HLL::Actions {
                 $/.CURSOR.panic("Combination of indirect name lookup and call not (yet?) allowed");
             }
             $past := self.make_indirect_lookup($<longname>)
-
-        } elsif $<args> {
+        }
+        elsif $<args> {
             # If we have args, it's a call. Look it up dynamically
             # and make the call.
             # Add & to name.
@@ -2495,12 +2616,46 @@ class Perl6::Actions is HLL::Actions {
             if pir::substr($final, 0, 1) ne '&' {
                 @name[+@name - 1] := '&' ~ $final;
             }
-            $past := capture_or_parcel($<args>.ast, ~$<longname>);
-            if +@name == 1 {
-                $past.name(@name[0]);
+            my $is_macro := 0;
+            my $routine;
+            try {
+                $routine := $*ST.find_symbol(@name);
+                if nqp::istype($routine, $*ST.find_symbol(['Macro'])) {
+                    $is_macro := 1;
+                }
+            }
+            if $is_macro {
+                my $ast_class := $*ST.find_symbol(['AST']);
+                my @argument_quasi_asts := [];
+                if $<args><semiarglist> {
+                    for $<args><semiarglist><arglist> {
+                        if $_<EXPR> {
+                            my $expr := $_<EXPR>.ast;
+                            add_macro_arguments($expr, $ast_class, @argument_quasi_asts);
+                        }
+                    }
+                }
+                elsif $<args><arglist> {
+                    if $<args><arglist><EXPR> {
+                        my $expr := $<args><arglist><EXPR>.ast;
+                        add_macro_arguments($expr, $ast_class, @argument_quasi_asts);
+                    }
+                }
+                my $quasi_ast := $routine(|@argument_quasi_asts);
+                unless nqp::istype($quasi_ast, $ast_class) {
+                    # XXX: Need to awesomeize with which type it got
+                    $/.CURSOR.panic('Macro did not return AST');
+                }
+                $past := nqp::getattr($quasi_ast, $ast_class, '$!past');
             }
             else {
-                $past.unshift($*ST.symbol_lookup(@name, $/));
+                $past := capture_or_parcel($<args>.ast, ~$<longname>);
+                if +@name == 1 {
+                    $past.name(@name[0]);
+                }
+                else {
+                    $past.unshift($*ST.symbol_lookup(@name, $/));
+                }
             }
         }
         else {
@@ -2790,15 +2945,39 @@ class Perl6::Actions is HLL::Actions {
             $past := PAST::Op.new( :node($/) );
             if $<OPER><O><pasttype> { $past.pasttype( ~$<OPER><O><pasttype> ); }
             elsif $<OPER><O><pirop>    { $past.pirop( ~$<OPER><O><pirop> ); }
+            my $name;
             unless $past.name {
                 if $key eq 'LIST' { $key := 'infix'; }
-                my $name := Q:PIR {
+                $name := Q:PIR {
                     $P0 = find_lex '$key'
                     $S0 = $P0
                     $S0 = downcase $S0
                     %r = box $S0
                 } ~ ':<' ~ $<OPER><sym> ~ '>';
                 $past.name('&' ~ $name);
+            }
+            my $routine;
+            my $is_macro := 0;
+            try {
+                $routine := $*ST.find_symbol(['&' ~ $name]);
+                if nqp::istype($routine, $*ST.find_symbol(['Macro'])) {
+                    $is_macro := 1;
+                }
+            }
+            if $is_macro {
+                my $ast_class := $*ST.find_symbol(['AST']);
+                my @argument_quasi_asts := [];
+                for @($/) {
+                    add_macro_arguments($_.ast, $ast_class, @argument_quasi_asts);
+                }
+
+                my $quasi_ast := $routine(|@argument_quasi_asts);
+                unless nqp::istype($quasi_ast, $ast_class) {
+                    # XXX: Need to awesomeize with which type it got
+                    $/.CURSOR.panic('Macro did not return AST');
+                }
+                make nqp::getattr($quasi_ast, $ast_class, '$!past');
+                return 'an irrelevant value';
             }
         }
         if $key eq 'POSTFIX' {
@@ -3437,6 +3616,14 @@ class Perl6::Actions is HLL::Actions {
         );
 
         make $past;
+    }
+
+    method quote:sym<quasi>($/) {
+        my $ast_class := $*ST.find_symbol(['AST']);
+        my $quasi_ast := $ast_class.new();
+        nqp::bindattr($quasi_ast, $ast_class, '$!past', $<block>.ast<past_block>[1]);
+        $*ST.add_object($quasi_ast);
+        make $*ST.get_slot_past_for_object($quasi_ast);
     }
 
     method quote_escape:sym<$>($/) {
