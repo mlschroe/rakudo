@@ -75,12 +75,12 @@ S02-magicals/pid.t
 S02-magicals/progname.t
 S02-names_and_variables/contextual.t
 S02-names_and_variables/fmt.t
-# S02-names_and_variables/names.t # needs fudging
+S02-names_and_variables/names.t
 # S02-names_and_variables/perl.t # err: Method 'Seq' not found for invocant of class 'Parcel' #icu
 S02-names_and_variables/list_array_perl.t
 # S02-names_and_variables/signature.t # err: Method 'make_signature' not found for invocant of class 'Perl6::SymbolTable'
 S02-names_and_variables/variables-and-packages.t
-# S02-names_and_variables/varnames.t # err: Cannot use bind operator with this LHS
+S02-names_and_variables/varnames.t
 S02-names/identifier.t
 S02-names/our.t
 S02-names/symbolic-deref.t
@@ -100,7 +100,7 @@ S03-junctions/associative.t
 S03-junctions/autothreading.t
 S03-junctions/boolean-context.t
 S03-junctions/misc.t
-# S03-metaops/cross.t # err: Nominal type check failed for parameter '$op'; expected Any but got Mu instead
+S03-metaops/cross.t
 S03-metaops/eager-hyper.t
 S03-metaops/hyper.t
 S03-metaops/not.t
@@ -187,7 +187,7 @@ S03-smartmatch/disorganized.t
 S03-smartmatch/hash-hash.t
 S03-smartmatch/regex-hash.t
 S03-smartmatch/scalar-hash.t
-# S04-blocks-and-statements/pointy-rw.t # err: Missing block
+S04-blocks-and-statements/pointy-rw.t
 S04-blocks-and-statements/pointy.t
 S04-phasers/end.t
 # S04-phasers/rvalue.t # err: Cannot assign a non-Perl 6 value to a Perl 6 container
@@ -229,6 +229,7 @@ S04-statements/until.t
 S04-statements/while.t
 S05-capture/caps.t
 # S05-capture/dot.t # err: Useless declaration of a has-scoped method in mainline
+S05-capture/match-object.t
 # S05-capture/named.t # err: Method 'rxtype' not found for invocant of class 'PAST;Regex'
 # S05-capture/subrule.t # err: Method 'rxtype' not found for invocant of class 'PAST;Regex'
 # S05-grammar/action-stubs.t # err: Null PMC access in set_pmc_keyed()
@@ -245,7 +246,7 @@ S05-grammar/methods.t
 S05-mass/named-chars.t
 # S05-mass/properties-block.t # err: Method 'isInAlphabeticPresentationForms' not found for invocant of class 'Cursor'
 # S05-mass/properties-derived.t # err: Method 'isASCIIHexDigit' not found for invocant of class 'Cursor'
-# S05-mass/properties-general.t # hangs
+# S05-mass/properties-general.t # err: Method 'isL' not found for invocant of class 'Cursor'
 # S05-mass/properties-script.t # err: Method 'isBidiL' not found for invocant of class 'Cursor'
 # S05-mass/rx.t # err: Method 'before' not found for invocant of class 'Cursor'
 # S05-mass/recursive.t # err: Method 'rxtype' not found for invocant of class 'PAST;Regex'
@@ -306,9 +307,9 @@ S06-operator-overloading/methods.t
 # S06-operator-overloading/sub.t # err: Unable to parse postcircumfix:sym<( )>
 # S06-operator-overloading/workout.t # err: Unable to parse postcircumfix:sym<( )>
 S06-other/anon-hashes-vs-blocks.t
-# S06-other/main.t # err: maximum recursion depth exceeded
+# S06-other/main.t # err: Odd number of elements found where hash expected
 S06-other/main-eval.t
-# S06-other/main-usage.t # hangs 
+# S06-other/main-usage.t # err: Command line arguments may not contain single or double quotes
 S06-other/misc.t
 S06-routine-modifiers/scoped-named-subs.t
 S06-signature/arity.t
@@ -319,7 +320,7 @@ S06-signature/defaults.t
 S06-signature/errors.t
 # S06-signature/introspection.t # err: No applicable candidates found to dispatch to for 'trait_mod:<is>'
 S06-signature/mixed-placeholders.t
-# S06-signature/named-parameters.t # err: Not enough positional parameters passed
+S06-signature/named-parameters.t
 S06-signature/named-placeholders.t
 S06-signature/optional.t
 S06-signature/passing-arrays.t
@@ -332,7 +333,7 @@ S06-signature/slurpy-and-interpolation.t
 S06-signature/slurpy-placeholders.t
 S06-signature/sub-ref.t
 S06-signature/tree-node-parameters.t
-# S06-signature/type-capture.t # err: Type check failed in assignment to '$y'; expected 'T' but got 'Rat'
+S06-signature/type-capture.t
 # S06-signature/types.t # err: Malformed block
 S06-signature/unpack-array.t
 S06-signature/unspecified.t
@@ -445,7 +446,7 @@ S14-roles/submethods.t
 # S14-traits/package.t # err: Invalid typename in parameter declaration
 # S14-traits/routines.t # err: Could not find sub &description
 # S14-traits/variables.t # err: Invalid typename in parameter declaration
-# S16-filehandles/filetest.t # err: Method 'z' not found for invocant of class 'IO'
+# S16-filehandles/filetest.t # err: Nominal type check failed for parameter '&call'; expected Callable but got Sub instead
 S16-filehandles/io.t
 S16-filehandles/io_in_for_loops.t
 S16-filehandles/io_in_while_loops.t
@@ -492,17 +493,18 @@ S32-hash/exists.t
 S32-hash/invert.t
 S32-hash/keys_values.t
 S32-hash/pairs.t
-# S32-hash/push.t # hangs
+# S32-hash/push.t # err: Cannot assign a non-Perl 6 value to a Perl 6 container
 S32-hash/slice.t
-# S32-io/dir.t # err: Could not find sub &dir
+S32-io/dir.t
 # S32-io/chdir.t # err: Method 'd' not found for invocant of class 'Str'
 S32-io/file-tests.t
 S32-io/note.t
 # S32-io/IO-Socket-INET.t # err: Useless declaration of a has-scoped method in mainline
+S32-list/categorize.t
 S32-list/classify.t
 S32-list/create.t
 S32-list/end.t
-# S32-list/first.t # err: Could not find sub &first
+S32-list/first.t
 S32-list/grep.t
 S32-list/join.t
 S32-list/map_function_return_values.t
@@ -517,7 +519,7 @@ S32-list/roll.t
 S32-num/abs.t
 S32-num/base.t
 S32-num/complex.t
-# S32-num/cool-num.t # err: Method 'abs' not found for invocant of class 'Str'
+S32-num/cool-num.t
 S32-num/exp.t
 S32-num/int.t
 S32-num/log.t

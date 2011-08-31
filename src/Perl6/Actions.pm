@@ -168,12 +168,10 @@ class Perl6::Actions is HLL::Actions {
 
         # If the unit defines &MAIN, add a &MAIN_HELPER.
         if $unit.symbol('&MAIN') {
-            $mainline.push(
-                PAST::Op.new(
-                    :pasttype('call'),
-                    :name('&MAIN_HELPER'),
-                    $mainline,
-                )
+            $mainline := PAST::Op.new(
+                :pasttype('call'),
+                :name('&MAIN_HELPER'),
+                $mainline,
             );
         }
 
@@ -313,6 +311,10 @@ class Perl6::Actions is HLL::Actions {
     method pod_block:sym<end>($/) {
     }
 
+    method pod_content:sym<config>($/) {
+        make Perl6::Pod::config($/);
+    }
+
     method pod_content:sym<text>($/) {
         my @ret := [];
         for $<pod_textcontent> {
@@ -342,19 +344,27 @@ class Perl6::Actions is HLL::Actions {
     }
 
     method pod_formatting_code($/) {
-        my @content := [];
-        for $<pod_string_character> {
-            @content.push($_.ast)
+        if ~$<code> eq 'V' {
+            make ~$<content>;
+        } else {
+            my @content := [];
+            for $<pod_string_character> {
+                @content.push($_.ast)
+            }
+            my @t    := Perl6::Pod::build_pod_string(@content);
+            my $past := Perl6::Pod::serialize_object(
+                'Pod::FormattingCode',
+                :type(
+                    $*ST.add_constant(
+                        'Str', 'str', ~$<code>
+                    )<compile_time_value>
+                ),
+                :content(
+                    Perl6::Pod::serialize_array(@t)<compile_time_value>
+                )
+            );
+            make $past<compile_time_value>;
         }
-        my @t    := Perl6::Pod::build_pod_string(@content);
-        my $past := Perl6::Pod::serialize_object(
-            'Pod::FormattingCode',
-            :type(
-                $*ST.add_constant('Str', 'str', ~$<code>)<compile_time_value>
-            ),
-            :content(Perl6::Pod::serialize_array(@t)<compile_time_value>),
-        );
-        make $past<compile_time_value>;
     }
 
     method pod_string($/) {
@@ -1416,7 +1426,7 @@ class Perl6::Actions is HLL::Actions {
     
     method autogenerate_proto($/, $name, $install_in) {
         my $p_past := $*ST.push_lexpad($/);
-        $p_past.name('AUTOGEN-PROTO');
+        $p_past.name(~$name);
         $p_past.push(PAST::Op.new( :pirop('perl6_enter_multi_dispatch_from_onlystar_block P') ));
         $*ST.pop_lexpad();
         $install_in.push(PAST::Stmt.new($p_past));
@@ -1582,13 +1592,7 @@ class Perl6::Actions is HLL::Actions {
             $/.CURSOR.panic('protoregexes not yet implemented');
         } else {
             my @params := $<signature> ?? $<signature>.ast !! [];
-            $coderef := regex_coderef($/, $<p6regex>.ast, $*SCOPE, $name, @params, $*CURPAD);
-        }
-
-        # Apply traits.
-        my $code := $coderef<code_object>;
-        for $<trait> {
-            if $_.ast { ($_.ast)($code) }
+            $coderef := regex_coderef($/, $<p6regex>.ast, $*SCOPE, $name, @params, $*CURPAD, $<trait>);
         }
 
         # Return closure if not in sink context.
@@ -1597,7 +1601,7 @@ class Perl6::Actions is HLL::Actions {
         make $closure;
     }
 
-    sub regex_coderef($/, $qast, $scope, $name, @params, $block) {
+    sub regex_coderef($/, $qast, $scope, $name, @params, $block, $traits?) {
         # create a code reference from a regex qast tree
         $block[0].push(PAST::Var.new(:name<$¢>, :scope<lexical_6model>, :isdecl(1)));
         $block[0].push(PAST::Var.new(:name<$/>, :scope<lexical_6model>, :isdecl(1)));
@@ -1620,7 +1624,14 @@ class Perl6::Actions is HLL::Actions {
         # Install PAST block so that it gets capture_lex'd correctly.
         my $outer := $*ST.cur_lexpad();
         $outer[0].push($past);
-
+        
+        # Apply traits.
+        if $traits {
+            for $traits {
+                if $_.ast { ($_.ast)($code) }
+            }
+        }
+        
         # Install in needed scopes.
         install_method($/, $name, $scope, $code, $outer);
 
@@ -2154,7 +2165,12 @@ class Perl6::Actions is HLL::Actions {
     }
 
     method trait_mod:sym<will>($/) {
-
+        my %arg;
+        %arg{~$<identifier>} := ($*ST.add_constant('Int', 'int', 1))<compile_time_value>;
+        make -> $declarand {
+            $*ST.apply_trait('&trait_mod:<will>', $declarand,
+                ($<pblock>.ast)<code_object>, |%arg);
+        };
     }
 
     method trait_mod:sym<of>($/) {
@@ -2312,15 +2328,15 @@ class Perl6::Actions is HLL::Actions {
     }
 
     method term:sym<...>($/) {
-        make PAST::Op.new( :pasttype('call'), :name('&fail'), 'Stub code executed', :node($/) );
+        make PAST::Op.new( :pasttype('call'), :name('&fail'), $*ST.add_constant('Str', 'str', 'Stub code executed'), :node($/) );
     }
 
     method term:sym<???>($/) {
-        make PAST::Op.new( :pasttype('call'), :name('&warn'), 'Stub code executed', :node($/) );
+        make PAST::Op.new( :pasttype('call'), :name('&warn'), $*ST.add_constant('Str', 'str', 'Stub code executed'), :node($/) );
     }
 
     method term:sym<!!!>($/) {
-        make PAST::Op.new( :pasttype('call'), :name('&die'), 'Stub code executed', :node($/) );
+        make PAST::Op.new( :pasttype('call'), :name('&die'), $*ST.add_constant('Str', 'str', 'Stub code executed'), :node($/) );
     }
 
     method term:sym<dotty>($/) {

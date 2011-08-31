@@ -1,5 +1,6 @@
 my package Pod {
     class Block {
+        has %.config;
         has @.content;
     }
 
@@ -35,6 +36,11 @@ my package Pod {
 
     class Item is Block {
         has $.level;
+    }
+
+    class Config {
+        has $.type;
+        has %.config;
     }
 }
 
