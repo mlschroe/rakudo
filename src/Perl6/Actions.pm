@@ -26,18 +26,12 @@ INIT {
 
 
 class Perl6::Actions is HLL::Actions {
-    our @PACKAGE;
-    our $TRUE;
     our @MAX_PERL_VERSION;
 
     our $FORBID_PIR;
     our $STATEMENT_PRINT;
 
     INIT {
-        # initialize @PACKAGE
-        our @PACKAGE := Q:PIR { %r = root_new ['parrot';'ResizablePMCArray'] };
-        our $TRUE := PAST::Var.new( :name('true'), :scope('register') );
-
         # Tell PAST::Var how to encode Perl6Str and Str values
         my %valflags :=
             Q:PIR { %r = get_hll_global ['PAST';'Compiler'], '%valflags' };
@@ -1250,9 +1244,9 @@ class Perl6::Actions is HLL::Actions {
         elsif $*SCOPE eq 'my' || $*SCOPE eq 'state' {
             # Create a container descriptor. Default to rw and set a
             # type if we have one; a trait may twiddle with that later.
+            my $type_cons := $*TYPENAME ?? $*TYPENAME.ast !! $*ST.find_symbol(['Mu']);
             my $descriptor := $*ST.create_container_descriptor(
-                $*TYPENAME ?? $*TYPENAME.ast !! $*ST.find_symbol(['Mu']),
-                1, $name);
+                $type_cons, 1, $name);
 
             # Install the container. Scalars default to Any if untyped.
             if $sigil eq '$' || $sigil eq '&' {
@@ -1265,11 +1259,19 @@ class Perl6::Actions is HLL::Actions {
                     :state($*SCOPE eq 'state'));
             }
 
-            # Set scope and type on container.
+            # Set scope and type on container, and if needed emit code to
+            # reify a generic type.
             if $past.isa(PAST::Var) {
                 $past.scope('lexical_6model');
                 $past.type($descriptor.of);
                 $past := box_native_if_needed($past, $descriptor.of);
+                if $type_cons.HOW.archetypes.generic {
+                    $past := PAST::Op.new(
+                        :pasttype('callmethod'), :name('instantiate_generic'),
+                        PAST::Op.new( :pirop('perl6_var PP'), $past ),
+                        PAST::Op.new( :pirop('set PQPs'),
+                            PAST::Op.new( :pirop('getinterp P') ), 'lexpad'));
+                }
             }
         }
         elsif $*SCOPE eq 'our' {
@@ -2410,9 +2412,33 @@ class Perl6::Actions is HLL::Actions {
             # type, since we can statically resolve them.
             my @name := Perl6::Grammar::parse_name(~$<longname>);
             if $<arglist> {
-                $/.CURSOR.panic("Parametric roles not yet implemented");
+                # Ensure arguments are allowed.
+                my $role := $*ST.find_symbol(@name);
+                unless $role.HOW.archetypes.parametric() {
+                    $/.CURSOR.panic("Cannot put type arguments on " ~
+                        ~$<longname> ~ " because it is not a parametric type");
+                }
+                
+                # Do we know all the arguments at compile time?
+                my $all_compile_time := 1;
+                for @($<arglist>[0].ast) {
+                    unless $_<has_compile_time_value> {
+                        $all_compile_time := 0;
+                    }
+                }
+                if $all_compile_time {
+                    $past := $*ST.get_object_sc_ref_past($*ST.curry_role(
+                        %*HOW<role-curried>, $role, $<arglist>, $/));
+                }
+                else {
+                    $past := $<arglist>[0].ast;
+                    $past.pasttype('callmethod');
+                    $past.name('new_type');
+                    $past.unshift(self.get_object_sc_ref_past($role));
+                    $past.unshift(self.get_object_sc_ref_past(%*HOW<role-curried>));
+                }
             }
-            if ~$<longname> eq 'GLOBAL' {
+            elsif ~$<longname> eq 'GLOBAL' {
                 $past := $*ST.symbol_lookup(@name, $/);
             }
             else {
@@ -3496,7 +3522,7 @@ class Perl6::Actions is HLL::Actions {
             ),
             $past);
         ($*ST.cur_lexpad())[0].push($block);
-        my $param := hash(:variable_name('$_'), :nominal_type($*ST.find_symbol(['Mu'])));
+        my $param := hash( :variable_name('$_'), :nominal_type($*ST.find_symbol(['Mu'])), :is_parcel(1) );
         my $sig := $*ST.create_signature([$*ST.create_parameter($param)]);
         add_signature_binding_code($block, $sig, [$param]);
         return reference_to_code_object(

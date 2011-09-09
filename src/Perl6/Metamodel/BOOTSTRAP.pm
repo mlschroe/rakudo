@@ -42,10 +42,6 @@ pir::perl6_set_type_packagehow__vP(Perl6::Metamodel::PackageHOW);
 
 # class Mu { ... }
 my stub Mu metaclass Perl6::Metamodel::ClassHOW { ... };
-
-# XXX Move out of bootstrap when possible.
-Mu.HOW.add_parrot_vtable_mapping(Mu, 'get_bool',
-    sub ($self) { nqp::unbox_i($self.Bool()) });
 Mu.HOW.add_parrot_vtable_mapping(Mu, 'get_integer',
     sub ($self) {
         nqp::unbox_i($self.Int())
@@ -195,6 +191,22 @@ Scalar.HOW.add_parent(Scalar, Any);
 Scalar.HOW.add_attribute(Scalar, BOOTSTRAPATTR.new(:name<$!descriptor>, :type(Mu)));
 Scalar.HOW.add_attribute(Scalar, BOOTSTRAPATTR.new(:name<$!value>, :type(Mu)));
 Scalar.HOW.add_attribute(Scalar, BOOTSTRAPATTR.new(:name<$!whence>, :type(Mu)));
+Scalar.HOW.add_method(Scalar, 'is_generic', sub ($self) {
+    my $dcself := pir::perl6_decontainerize__PP($self);
+    nqp::getattr($dcself, Scalar, '$!descriptor').is_generic()
+});
+Scalar.HOW.add_method(Scalar, 'instantiate_generic', sub ($self, $type_environment) {
+    my $dcself := pir::perl6_decontainerize__PP($self);
+    nqp::bindattr($dcself, Scalar, '$!descriptor',
+        nqp::getattr($dcself, Scalar, '$!descriptor').instantiate_generic(
+            $type_environment));
+    my $val := nqp::getattr($dcself, Scalar, '$!value');
+    if $val.HOW.archetypes.generic {
+        nqp::bindattr($dcself, Scalar, '$!value',
+            $val.HOW.instantiate_generic($val, $type_environment));
+    }
+    $self
+});
 pir::set_scalar_container_type__vP(Scalar);
 
 # Scalar needs to be registered as a container type.
@@ -484,6 +496,8 @@ Regex.HOW.publish_parrot_vtable_mapping(Regex);
 my stub Str metaclass Perl6::Metamodel::ClassHOW { ... };
 Str.HOW.add_parent(Str, Cool);
 Str.HOW.add_attribute(Str, BOOTSTRAPATTR.new(:name<$!value>, :type(str), :box_target(1)));
+Str.HOW.set_boolification_mode(Str, 4);
+Str.HOW.publish_boolification_spec(Str);
 
 # XXX: Numeric and Real are really roles; this stubs them in as classes for now.
 # class Numeric is Cool { ... }
@@ -501,6 +515,8 @@ Real.HOW.add_parent(Real, Numeric);
 my stub Int metaclass Perl6::Metamodel::ClassHOW { ... };
 Int.HOW.add_parent(Int, Real);
 Int.HOW.add_attribute(Int, BOOTSTRAPATTR.new(:name<$!value>, :type(int), :box_target(1)));
+Int.HOW.set_boolification_mode(Int, 1);
+Int.HOW.publish_boolification_spec(Int);
 
 # class Num is (Cool does) Real {
 #     has num $!value is box_target;
@@ -509,6 +525,8 @@ Int.HOW.add_attribute(Int, BOOTSTRAPATTR.new(:name<$!value>, :type(int), :box_ta
 my stub Num metaclass Perl6::Metamodel::ClassHOW { ... };
 Num.HOW.add_parent(Num, Real);
 Num.HOW.add_attribute(Num, BOOTSTRAPATTR.new(:name<$!value>, :type(num), :box_target(1)));
+Num.HOW.set_boolification_mode(Num, 2);
+Num.HOW.publish_boolification_spec(Num);
 
 # Stash these common types for box ops.
 pir::perl6_set_types_ins__vPPP(Int, Num, Str);
@@ -606,12 +624,9 @@ pir::perl6_set_type_capture__vP(Capture);
 my stub Bool metaclass Perl6::Metamodel::ClassHOW { ... };
 Bool.HOW.add_parent(Bool, Cool);
 Bool.HOW.add_attribute(Bool, BOOTSTRAPATTR.new(:name<$!value>, :type(int), :box_target(1)));
-Bool.HOW.add_parrot_vtable_mapping(Bool, 'get_bool',
-    sub ($self) {
-        pir::repr_defined__IP($self) ?? nqp::unbox_i($self) !! 0
-    });
-Bool.HOW.publish_parrot_vtable_mapping(Bool);
-    
+Bool.HOW.set_boolification_mode(Bool, 1);
+Bool.HOW.publish_boolification_spec(Bool);
+
 # Set up Stash type, using a Parrot hash under the hood for storage.
 my stub Stash metaclass Perl6::Metamodel::ClassHOW { ... };
 Stash.HOW.add_parent(Stash, Hash);
@@ -696,7 +711,11 @@ Perl6::Metamodel::ParametricRoleHOW.pretend_to_be([Cool, Any, Mu]);
 Perl6::Metamodel::ParametricRoleHOW.configure_punning(
     Perl6::Metamodel::ClassHOW,
     hash( ACCEPTS => Mu ));
-    
+Perl6::Metamodel::CurriedRoleHOW.pretend_to_be([Cool, Any, Mu]);
+Perl6::Metamodel::CurriedRoleHOW.configure_punning(
+    Perl6::Metamodel::ClassHOW,
+    hash( ACCEPTS => Mu ));
+
 # Similar for packages and modules, but just has methods from Any.
 Perl6::Metamodel::PackageHOW.pretend_to_be([Any, Mu]);
 Perl6::Metamodel::PackageHOW.delegate_methods_to(Any);

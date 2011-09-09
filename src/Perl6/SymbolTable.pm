@@ -80,9 +80,9 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         
         # Deserialization code creates the static lexpad. Both that and the
         # fixup need to associate it with the low-level LexInfo.
-        my $des := self.set_slot_past($slot, self.set_cur_sc(PAST::Op.new(
+        my $des := self.add_object_to_cur_sc_past($slot, PAST::Op.new(
             :pirop('repr_instance_of PP'), $slp_type_obj_ref
-        )));
+        ));
         my $fix := PAST::Op.new(
             :pasttype('callmethod'), :name('set_static_lexpad'),
             PAST::Op.new(
@@ -169,15 +169,17 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         my $module := Perl6::ModuleLoader.load_module($module_name, $cur_GLOBALish);
         
         # Make sure we do the loading during deserialization.
-        self.add_event(:deserialize_past(PAST::Stmts.new(
-            self.perl6_module_loader_code(),
-            PAST::Op.new(
-               :pasttype('callmethod'), :name('load_module'),
-               PAST::Var.new( :name('ModuleLoader'), :namespace([]), :scope('package') ),
-               $module_name,
-               self.get_slot_past_for_object($cur_GLOBALish)
-            ))));
-            
+        if self.is_precompilation_mode() {
+            self.add_event(:deserialize_past(PAST::Stmts.new(
+                self.perl6_module_loader_code(),
+                PAST::Op.new(
+                   :pasttype('callmethod'), :name('load_module'),
+                   PAST::Var.new( :name('ModuleLoader'), :namespace([]), :scope('package') ),
+                   $module_name,
+                   self.get_slot_past_for_object($cur_GLOBALish)
+                ))));
+        }
+
         return pir::getattribute__PPs($module, 'lex_pad');
     }
     
@@ -226,22 +228,27 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         my $des := PAST::Stmts.new();
         for %stash {
             $slp.add_static_value($_.key, $_.value, 0, 0);
-            $des.push(PAST::Op.new(
-                :pasttype('callmethod'), :name('add_static_value'),
-                $slp_ref, $_.key,
-                PAST::Var.new(
-                    :scope('keyed'),
-                    PAST::Op.new(
-                        :pirop('get_who PP'),
-                        self.get_object_sc_ref_past($package)
+            if self.is_precompilation_mode() {
+                $des.push(PAST::Op.new(
+                    :pasttype('callmethod'), :name('add_static_value'),
+                    $slp_ref, $_.key,
+                    PAST::Var.new(
+                        :scope('keyed'),
+                        PAST::Op.new(
+                            :pirop('get_who PP'),
+                            self.get_object_sc_ref_past($package)
+                        ),
+                        $_.key
                     ),
-                    $_.key
-                ),
-                0, 0
-            ));            
+                    0, 0
+                ));
+            }
         }
         
-        self.add_event(:deserialize_past($des));
+        if self.is_precompilation_mode() {
+            self.add_event(:deserialize_past($des));
+        }
+
         1;
     }
     
@@ -322,12 +329,14 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         # Add to static lexpad, and generate deserialization code.
         my $slp := self.get_static_lexpad($block);
         $slp.add_static_value(~$name, $obj, 0, 0);
-        self.add_event(:deserialize_past(PAST::Stmt.new(PAST::Op.new(
-            :pasttype('callmethod'), :name('add_static_value'),
-            self.get_object_sc_ref_past($slp), 
-            ~$name, self.get_object_sc_ref_past($obj), 0, 0
-        ))));
-        
+        if self.is_precompilation_mode() {
+            self.add_event(:deserialize_past(PAST::Stmt.new(PAST::Op.new(
+                :pasttype('callmethod'), :name('add_static_value'),
+                self.get_object_sc_ref_past($slp), 
+                ~$name, self.get_object_sc_ref_past($obj), 0, 0
+            ))));
+        }
+
         1;
     }
     
@@ -363,12 +372,14 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         # code to also do so.
         my $slp := self.get_static_lexpad($block);
         $slp.add_static_value(~$name, $cont, 1, ($state ?? 1 !! 0));
-        self.add_event(:deserialize_past(PAST::Stmt.new(PAST::Op.new(
-            :pasttype('callmethod'), :name('add_static_value'),
-            self.get_object_sc_ref_past($slp), 
-            ~$name, $cont_code, 1, ($state ?? 1 !! 0)
-        ))));
-        
+        if self.is_precompilation_mode() {
+            self.add_event(:deserialize_past(PAST::Stmt.new(PAST::Op.new(
+                :pasttype('callmethod'), :name('add_static_value'),
+                self.get_object_sc_ref_past($slp), 
+                ~$name, $cont_code, 1, ($state ?? 1 !! 0)
+            ))));
+        }
+
         1;
     }
     
@@ -424,16 +435,19 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         ($package.WHO){$name} := $obj;
         
         # Add deserialization installation of the symbol.
-        my $package_ref := self.get_object_sc_ref_past($package);
-        self.add_event(:deserialize_past(PAST::Op.new(
-            :pasttype('bind_6model'),
-            PAST::Var.new(
-                :scope('keyed'),
-                PAST::Op.new( :pirop('get_who PP'), $package_ref ),
-                ~$name
-            ),
-            self.get_object_sc_ref_past($obj)
-        )));
+        if self.is_precompilation_mode() {
+            my $package_ref := self.get_object_sc_ref_past($package);
+            self.add_event(:deserialize_past(PAST::Op.new(
+                :pasttype('bind_6model'),
+                PAST::Var.new(
+                    :scope('keyed'),
+                    PAST::Op.new( :pirop('get_who PP'), $package_ref ),
+                    ~$name
+                ),
+                self.get_object_sc_ref_past($obj)
+            )));
+        }
+
         1;
     }
     
@@ -444,37 +458,7 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         my $parameter := pir::repr_instance_of__PP($par_type);
         my $slot      := self.add_object($parameter);
         
-        # Create PAST to make it when deserializing.
-        my $obj_reg := PAST::Var.new( :name('$P0'), :scope('register') );
-        my $class_reg := PAST::Var.new( :name('$P1'), :scope('register') );
-        my $set_attrs := PAST::Stmts.new( );
-        self.add_event(:deserialize_past(PAST::Stmts.new(
-            PAST::Op.new(
-                :pasttype('bind'), $class_reg,
-                self.get_object_sc_ref_past($par_type)
-            ),
-            self.set_slot_past($slot, self.set_cur_sc(PAST::Op.new(
-                :pasttype('bind_6model'), $obj_reg,
-                PAST::Op.new(
-                    :pirop('repr_instance_of PP'),
-                    $class_reg
-                )))),
-            $set_attrs
-        )));
-        
-        # Set name if there is one.
-        if pir::exists(%param_info, 'variable_name') {
-            pir::repr_bind_attr_str__vPPsS($parameter, $par_type, '$!variable_name', %param_info<variable_name>);
-            $set_attrs.push(self.set_attribute_typed($obj_reg, $class_reg,
-                '$!variable_name', %param_info<variable_name>, str));
-        }
-        
-        # Set nominal type.
-        pir::setattribute__vPPsP($parameter, $par_type, '$!nominal_type', %param_info<nominal_type>);
-        $set_attrs.push(self.set_attribute($parameter, $par_type, '$!nominal_type',
-            self.get_object_sc_ref_past(%param_info<nominal_type>)));
-        
-        # Calculate and set flags.
+        # Calculate flags.
         my $flags := 0;
         if %param_info<optional> {
             $flags := $flags + $SIG_ELEM_IS_OPTIONAL;
@@ -527,65 +511,119 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         if %param_info<nominal_generic> {
             $flags := $flags + $SIG_ELEM_NOMINAL_GENERIC;
         }
-        pir::repr_bind_attr_int__vPPsI($parameter, $par_type, '$!flags', $flags);
-        $set_attrs.push(self.set_attribute_typed($obj_reg, $class_reg,
-            '$!flags', $flags, int));
         
-        # Set named names up, for named parameters.
+        # Populate it.
+        if pir::exists(%param_info, 'variable_name') {
+            pir::repr_bind_attr_str__vPPsS($parameter, $par_type, '$!variable_name', %param_info<variable_name>);
+        }
+        pir::setattribute__vPPsP($parameter, $par_type, '$!nominal_type', %param_info<nominal_type>);
+        pir::repr_bind_attr_int__vPPsI($parameter, $par_type, '$!flags', $flags);
         if %param_info<named_names> {
             my @names := %param_info<named_names>;
             pir::setattribute__vPPsP($parameter, $par_type, '$!named_names', @names);
-            $set_attrs.push(self.set_attribute($parameter, $par_type, '$!named_names',
-                PAST::Op.new( :pasttype('list'), |@names )));
         }
-        
-        # Set type captures up.
         if %param_info<type_captures> {
             my @type_names := %param_info<type_captures>;
             pir::setattribute__vPPsP($parameter, $par_type, '$!type_captures', @type_names);
-            $set_attrs.push(self.set_attribute($parameter, $par_type, '$!type_captures',
-                PAST::Op.new( :pasttype('list'), |@type_names )));
         }
-        
-        # Post constraints.
         if %param_info<post_constraints> {
             pir::setattribute__vPPsP($parameter, $par_type, '$!post_constraints',
                 %param_info<post_constraints>);
-            $set_attrs.push(self.set_attribute($parameter, $par_type, '$!post_constraints',
-                (my $con_list := PAST::Op.new( :pasttype('list') ))));
-            for %param_info<post_constraints> {
-                $con_list.push(self.get_object_sc_ref_past($_));
-            }
         }
-        
-        # Set default value thunk up, if there is one.
         if pir::exists(%param_info, 'default_closure') {
             pir::setattribute__vPPsP($parameter, $par_type, '$!default_closure', %param_info<default_closure>);
-            $set_attrs.push(self.set_attribute($parameter, $par_type, '$!default_closure',
-                self.get_object_sc_ref_past(%param_info<default_closure>)));
         }
-        
-        # Set container descriptor, if there is one.
         if pir::exists(%param_info, 'container_descriptor') {
             pir::setattribute__vPPsP($parameter, $par_type, '$!container_descriptor', %param_info<container_descriptor>);
-            $set_attrs.push(self.set_attribute($parameter, $par_type, '$!container_descriptor',
-                self.get_object_sc_ref_past(%param_info<container_descriptor>)));
         }
-        
-        # Set attributive bind package up, if there is one.
         if pir::exists(%param_info, 'attr_package') {
             pir::setattribute__vPPsP($parameter, $par_type, '$!attr_package', %param_info<attr_package>);
-            $set_attrs.push(self.set_attribute($parameter, $par_type, '$!attr_package',
-                self.get_object_sc_ref_past(%param_info<attr_package>)));
         }
-        
-        # Set sub-signature up, if there is one.
         if pir::exists(%param_info, 'sub_signature') {
             pir::setattribute__vPPsP($parameter, $par_type, '$!sub_signature', %param_info<sub_signature>);
-            $set_attrs.push(self.set_attribute($parameter, $par_type, '$!sub_signature',
-                self.get_object_sc_ref_past(%param_info<sub_signature>)));
         }
         
+        # Create PAST to make it when deserializing.
+        if self.is_precompilation_mode() {
+            my $obj_reg := PAST::Var.new( :name('$P0'), :scope('register') );
+            my $class_reg := PAST::Var.new( :name('$P1'), :scope('register') );
+            my $set_attrs := PAST::Stmts.new( );
+            self.add_event(:deserialize_past(PAST::Stmts.new(
+                PAST::Op.new(
+                    :pasttype('bind'), $class_reg,
+                    self.get_object_sc_ref_past($par_type)
+                ),
+                self.add_object_to_cur_sc_past($slot, PAST::Op.new(
+                    :pasttype('bind_6model'), $obj_reg,
+                    PAST::Op.new(
+                        :pirop('repr_instance_of PP'),
+                        $class_reg
+                    ))),
+                $set_attrs
+            )));
+            
+            # Set name if there is one.
+            if pir::exists(%param_info, 'variable_name') {
+                $set_attrs.push(self.set_attribute_typed($obj_reg, $class_reg,
+                    '$!variable_name', %param_info<variable_name>, str));
+            }
+            
+            # Set nominal type.
+            $set_attrs.push(self.set_attribute_reg($obj_reg, $class_reg, '$!nominal_type',
+                self.get_object_sc_ref_past(%param_info<nominal_type>)));
+            
+            # Set flags.
+            $set_attrs.push(self.set_attribute_typed($obj_reg, $class_reg,
+                '$!flags', $flags, int));
+            
+            # Set named names up, for named parameters.
+            if %param_info<named_names> {
+                my @names := %param_info<named_names>;
+                $set_attrs.push(self.set_attribute_reg($obj_reg, $class_reg, '$!named_names',
+                    PAST::Op.new( :pasttype('list'), |@names )));
+            }
+            
+            # Set type captures up.
+            if %param_info<type_captures> {
+                my @type_names := %param_info<type_captures>;
+                $set_attrs.push(self.set_attribute_reg($obj_reg, $class_reg, '$!type_captures',
+                    PAST::Op.new( :pasttype('list'), |@type_names )));
+            }
+            
+            # Post constraints.
+            if %param_info<post_constraints> {
+                $set_attrs.push(self.set_attribute_reg($obj_reg, $class_reg, '$!post_constraints',
+                    (my $con_list := PAST::Op.new( :pasttype('list') ))));
+                for %param_info<post_constraints> {
+                    $con_list.push(self.get_object_sc_ref_past($_));
+                }
+            }
+            
+            # Set default value thunk up, if there is one.
+            if pir::exists(%param_info, 'default_closure') {
+                $set_attrs.push(self.set_attribute_reg($obj_reg, $class_reg, '$!default_closure',
+                    self.get_object_sc_ref_past(%param_info<default_closure>)));
+            }
+            
+            # Set container descriptor, if there is one.
+            if pir::exists(%param_info, 'container_descriptor') {
+                $set_attrs.push(self.set_attribute_reg($obj_reg, $class_reg, '$!container_descriptor',
+                    self.get_object_sc_ref_past(%param_info<container_descriptor>)));
+            }
+            
+            # Set attributive bind package up, if there is one.
+            if pir::exists(%param_info, 'attr_package') {
+                $set_attrs.push(self.set_attribute_reg($obj_reg, $class_reg, '$!attr_package',
+                    self.get_object_sc_ref_past(%param_info<attr_package>)));
+            }
+            
+            # Set sub-signature up, if there is one.
+            if pir::exists(%param_info, 'sub_signature') {
+                $set_attrs.push(self.set_attribute_reg($obj_reg, $class_reg, '$!sub_signature',
+                    self.get_object_sc_ref_past(%param_info<sub_signature>)));
+            }
+        }
+
         # Return created parameter.
         $parameter
     }
@@ -601,17 +639,19 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         pir::setattribute__vPPsP($signature, $sig_type, '$!params', @parameters);
         
         # Create PAST to make it when deserializing.
-        my $param_past := PAST::Op.new( :pasttype('list') );
-        for @parameters {
-            $param_past.push(self.get_slot_past_for_object($_));
+        if self.is_precompilation_mode() {
+            my $param_past := PAST::Op.new( :pasttype('list') );
+            for @parameters {
+                $param_past.push(self.get_slot_past_for_object($_));
+            }
+            self.add_event(:deserialize_past(PAST::Stmts.new(
+                self.add_object_to_cur_sc_past($slot, PAST::Op.new(
+                    :pirop('repr_instance_of PP'),
+                    self.get_object_sc_ref_past($sig_type)
+                )),
+                self.set_attribute($signature, $sig_type, '$!params', $param_past)
+            )));
         }
-        self.add_event(:deserialize_past(PAST::Stmts.new(
-            self.set_slot_past($slot, self.set_cur_sc(PAST::Op.new(
-                :pirop('repr_instance_of PP'),
-                self.get_object_sc_ref_past($sig_type)
-            ))),
-            self.set_attribute($signature, $sig_type, '$!params', $param_past)
-        )));
         
         # Return created signature.
         $signature
@@ -664,61 +704,70 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         # Fixup will install the real thing, unless we're in a role, in
         # which case pre-comp will have sorted it out.
         unless $*PKGDECL eq 'role' {
-            $fixups.push(PAST::Stmts.new(
-                self.set_attribute($code, $code_type, '$!do', PAST::Val.new( :value($code_past) )),
-                PAST::Op.new(
-                    :pirop('perl6_associate_sub_code_object vPP'),
-                    PAST::Val.new( :value($code_past) ),
-                    self.get_object_sc_ref_past($code)
-                )));
-            
-            # If we clone the stub, then we must remember to do a fixup
-            # of it also.
-            pir::setprop__vPsP($stub, 'CLONE_CALLBACK', sub ($orig, $clone) {
-                self.add_object($clone);
+            unless self.is_precompilation_mode() {
                 $fixups.push(PAST::Stmts.new(
-                    PAST::Op.new( :pasttype('bind'),
-                        PAST::Var.new( :name('$P0'), :scope('register') ),
-                        PAST::Op.new( :pirop('clone PP'), PAST::Val.new( :value($code_past) ) )
-                    ),
-                    self.set_attribute($clone, $code_type, '$!do',
-                        PAST::Var.new( :name('$P0'), :scope('register') )),
+                    self.set_attribute($code, $code_type, '$!do', PAST::Val.new( :value($code_past) )),
                     PAST::Op.new(
                         :pirop('perl6_associate_sub_code_object vPP'),
-                        PAST::Var.new( :name('$P0'), :scope('register') ),
-                        self.get_object_sc_ref_past($clone)
+                        PAST::Val.new( :value($code_past) ),
+                        self.get_object_sc_ref_past($code)
                     )));
-            });
-			
+                
+                # If we clone the stub, then we must remember to do a fixup
+                # of it also.
+                pir::setprop__vPsP($stub, 'CLONE_CALLBACK', sub ($orig, $clone) {
+                    self.add_object($clone);
+                    $fixups.push(PAST::Stmts.new(
+                        PAST::Op.new( :pasttype('bind'),
+                            PAST::Var.new( :name('$P0'), :scope('register') ),
+                            PAST::Op.new( :pirop('clone PP'), PAST::Val.new( :value($code_past) ) )
+                        ),
+                        self.set_attribute($clone, $code_type, '$!do',
+                            PAST::Var.new( :name('$P0'), :scope('register') )),
+                        PAST::Op.new(
+                            :pirop('perl6_associate_sub_code_object vPP'),
+                            PAST::Var.new( :name('$P0'), :scope('register') ),
+                            self.get_object_sc_ref_past($clone)
+                        )));
+                });
+            }
+
 			# Attach the PAST block to the stub.
 			pir::setprop__vPsP($stub, 'PAST_BLOCK', $code_past);
         }
         
         # Desserialization should do the actual creation and just put the right
         # code in there in the first place.
-        $des.push(self.set_slot_past($slot, self.set_cur_sc(PAST::Op.new(
-            :pirop('repr_instance_of PP'),
-            self.get_object_sc_ref_past($type_obj)
-        ))));
-        $des.push(self.set_attribute($code, $code_type, '$!do', PAST::Val.new( :value($code_past) )));
-        
+        if self.is_precompilation_mode() {
+            $des.push(self.add_object_to_cur_sc_past($slot, PAST::Op.new(
+                :pirop('repr_instance_of PP'),
+                self.get_object_sc_ref_past($type_obj)
+            )));
+            $des.push(self.set_attribute($code, $code_type, '$!do', PAST::Val.new( :value($code_past) )));
+        }
         # Install signauture now and add to deserialization.
         pir::setattribute__vPPsP($code, $code_type, '$!signature', $signature);
-        $des.push(self.set_attribute($code, $code_type, '$!signature', self.get_object_sc_ref_past($signature)));
+        if self.is_precompilation_mode() {
+            $des.push(self.set_attribute($code, $code_type, '$!signature', self.get_object_sc_ref_past($signature)));
+        }
         
         # If this is a dispatcher, install dispatchee list that we can
         # add the candidates too.
         if $is_dispatcher {
             pir::setattribute__vPPsP($code, $code_type, '$!dispatchees', []);
-            $des.push(self.set_attribute($code, $code_type, '$!dispatchees',
-                PAST::Op.new( :pasttype('list') )));
+            if self.is_precompilation_mode() {
+                $des.push(self.set_attribute($code, $code_type, '$!dispatchees',
+                    PAST::Op.new( :pasttype('list') )));
+            }
         }
         
         # Deserialization also needs to give the Parrot sub its backlink.
-        $des.push(PAST::Op.new(
-            :pirop('perl6_associate_sub_code_object vPP'),
-            PAST::Val.new( :value($code_past) ),
-            self.get_object_sc_ref_past($code)));
+        if self.is_precompilation_mode() {
+            $des.push(PAST::Op.new(
+                :pirop('perl6_associate_sub_code_object vPP'),
+                PAST::Val.new( :value($code_past) ),
+                self.get_object_sc_ref_past($code)));
+        }
 
         # If it's a routine, flag that it needs fresh magicals.
         if pir::type_check__IPP($code, self.find_symbol(['Routine'])) {
@@ -742,11 +791,13 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         $proto.add_dispatchee($candidate);
         
         # Deserializatin code to add it.
-        self.add_event(:deserialize_past(PAST::Op.new(
-            :pasttype('callmethod'), :name('add_dispatchee'),
-            self.get_object_sc_ref_past($proto),
-            self.get_object_sc_ref_past($candidate)
-        )));
+        if self.is_precompilation_mode() {
+            self.add_event(:deserialize_past(PAST::Op.new(
+                :pasttype('callmethod'), :name('add_dispatchee'),
+                self.get_object_sc_ref_past($proto),
+                self.get_object_sc_ref_past($candidate)
+            )));
+        }
     }
     
     # Derives a proto to get a dispatch.
@@ -756,12 +807,13 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         my $slot    := self.add_object($derived);
         
         # Add deserialization action.
-        my $des := PAST::Op.new(
-            :pasttype('callmethod'), :name('derive_dispatcher'),
-            self.get_object_sc_ref_past($proto));
-        self.add_event(:deserialize_past(
-            self.set_slot_past($slot, self.set_cur_sc($des))
-        ));
+        if self.is_precompilation_mode() {
+            my $des := PAST::Op.new(
+                :pasttype('callmethod'), :name('derive_dispatcher'),
+                self.get_object_sc_ref_past($proto));
+            self.add_event(:deserialize_past(
+                self.add_object_to_cur_sc_past($slot, $des)));
+        }
         
         return $derived;
     }
@@ -770,67 +822,59 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
     method create_container_descriptor($of, $rw, $name) {
         # Create descriptor object now.
         my $cd_type := self.find_symbol(['ContainerDescriptor']);
-        my $cd      := pir::repr_instance_of__PP($cd_type);
+        my $cd      := pir::perl6_create_container_descriptor__PPPis($cd_type, $of, $rw, $name);
         my $slot    := self.add_object($cd);
         
         # Create PAST to make it when deserializing.
-        my $obj_reg := PAST::Var.new( :name('$P0'), :scope('register') );
-        my $class_reg := PAST::Var.new( :name('$P1'), :scope('register') );
-        my $set_attrs := PAST::Stmts.new();
-        self.add_event(:deserialize_past(PAST::Stmts.new(
-            PAST::Op.new(
-                :pasttype('bind'), $class_reg,
-                self.get_object_sc_ref_past($cd_type)
-            ),
-            self.set_slot_past($slot, self.set_cur_sc(PAST::Op.new(
-                :pasttype('bind'), $obj_reg,
-                PAST::Op.new(
-                    :pirop('repr_instance_of PP'),
-                    $class_reg
-                )))),
-            $set_attrs
-        )));
-        
-        # Set attributes.
-        pir::setattribute__vPPsP($cd, $cd_type, '$!of', $of);
-        $set_attrs.push(self.set_attribute($cd, $cd_type, '$!of',
-            self.get_object_sc_ref_past($of)));
-        pir::repr_bind_attr_int__vPPsI($cd, $cd_type, '$!rw', $rw);
-        $set_attrs.push(self.set_attribute_typed($obj_reg, $class_reg, '$!rw', $rw, int));
-        pir::repr_bind_attr_str__vPPsS($cd, $cd_type, '$!name', $name);
-        $set_attrs.push(self.set_attribute_typed($obj_reg, $class_reg, '$!name', $name, str));
-        
+        if self.is_precompilation_mode() {
+            self.add_event(:deserialize_past(
+                self.add_object_to_cur_sc_past($slot, PAST::Op.new(
+                    :pirop('perl6_create_container_descriptor PPPis'),
+                    self.get_object_sc_ref_past($cd_type),
+                    self.get_object_sc_ref_past($of),
+                    $rw, $name))));
+        }
+
         $cd
     }
     
     # Helper to make PAST for setting an attribute to a value. Value should
     # be a PAST tree.
     method set_attribute($obj, $class, $name, $value_past) {
-        PAST::Stmt.new(
-            PAST::Op.new(
-                :pasttype('bind_6model'),
-                PAST::Var.new(
-                    :name($name), :scope('attribute_6model'),
-                    self.get_object_sc_ref_past($obj), 
-                    self.get_object_sc_ref_past($class)
-                ),
-                $value_past
-            )
+        PAST::Op.new(
+            :pasttype('bind_6model'),
+            PAST::Var.new(
+                :name($name), :scope('attribute_6model'),
+                self.get_object_sc_ref_past($obj), 
+                self.get_object_sc_ref_past($class)
+            ),
+            $value_past
+        )
+    }
+    
+    # Helper to make PAST for setting an attribute to a value. Value should
+    # be a PAST tree. Expects to be given registers with object and class in.
+    method set_attribute_reg($obj_reg, $class_reg, $name, $value_past) {
+        PAST::Op.new(
+            :pasttype('bind_6model'),
+            PAST::Var.new(
+                :name($name), :scope('attribute_6model'),
+                $obj_reg, $class_reg
+            ),
+            $value_past
         )
     }
     
     # Helper to make PAST for setting a typed attribute to a value. Value should
     # be a PAST tree.
     method set_attribute_typed($obj_reg, $class_reg, $name, $value_past, $type) {
-        PAST::Stmt.new(
-            PAST::Op.new(
-                :pasttype('bind_6model'),
-                PAST::Var.new(
-                    :name($name), :scope('attribute_6model'), :type($type),
-                    $obj_reg, $class_reg
-                ),
-                $value_past
-            )
+        PAST::Op.new(
+            :pasttype('bind_6model'),
+            PAST::Var.new(
+                :name($name), :scope('attribute_6model'), :type($type),
+                $obj_reg, $class_reg
+            ),
+            $value_past
         )
     }
 
@@ -974,11 +1018,11 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         else {
             pir::die("Don't know how to build a $primitive constant");
         }
+        
         # Add to SC, finish up deserialization code.
         my $slot := self.add_object($constant);
         self.add_event(:deserialize_past(
-            self.set_slot_past($slot, self.set_cur_sc($des))
-        ));
+            self.add_object_to_cur_sc_past($slot, $des)));
         
         # Build PAST for getting the boxed constant from the constants
         # table, but also annotate it with the constant itself in case
@@ -1017,23 +1061,25 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         
         # Add an event. There's no fixup to do, just a type object to create
         # on deserialization.
-        my $setup_call := PAST::Op.new(
-            :pasttype('callmethod'), :name('new_type'),
-            self.get_object_sc_ref_past($how)
-        );
-        if pir::defined($name) {
-            $setup_call.push(PAST::Val.new( :value(~$name), :named('name') ));
+        if self.is_precompilation_mode() {
+            my $setup_call := PAST::Op.new(
+                :pasttype('callmethod'), :name('new_type'),
+                self.get_object_sc_ref_past($how)
+            );
+            if pir::defined($name) {
+                $setup_call.push(PAST::Val.new( :value(~$name), :named('name') ));
+            }
+            if pir::defined($repr) {
+                $setup_call.push(PAST::Val.new( :value(~$repr), :named('repr') ));
+            }
+            if pir::exists(%extra, 'base_type') {
+                $setup_call.push(my $ref := self.get_object_sc_ref_past(%extra<base_type>));
+                $ref.named('base_type');
+            }
+            self.add_event(:deserialize_past(
+                self.add_object_to_cur_sc_past($slot, $setup_call)));
         }
-        if pir::defined($repr) {
-            $setup_call.push(PAST::Val.new( :value(~$repr), :named('repr') ));
-        }
-        if pir::exists(%extra, 'base_type') {
-            $setup_call.push(my $ref := self.get_object_sc_ref_past(%extra<base_type>));
-            $ref.named('base_type');
-        }
-        self.add_event(:deserialize_past(
-            self.set_slot_past($slot, self.set_cur_sc($setup_call))));
-        
+
         # Result is just the object.
         return $mo;
     }
@@ -1061,32 +1107,34 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         my $slot := self.add_object($attr);
         
         # Emit code to create attribute deserializing.
-        $cont_past.named('auto_viv_container');
-        my $create_call := PAST::Op.new(
-            :pasttype('callmethod'), :name('new'),
-            self.get_object_sc_ref_past($meta_attr),
-            $cont_past
-        );
-        for %lit_args {
-            $create_call.push(PAST::Val.new( :value($_.value), :named($_.key) ));
-        }
-        for %obj_args {
-            my $lookup := self.get_object_sc_ref_past($_.value);
-            $lookup.named($_.key);
-            $create_call.push($lookup);
-        }
-        self.add_event(:deserialize_past(
-            self.set_slot_past($slot, self.set_cur_sc($create_call))));
+        if self.is_precompilation_mode() {
+            $cont_past.named('auto_viv_container');
+            my $create_call := PAST::Op.new(
+                :pasttype('callmethod'), :name('new'),
+                self.get_object_sc_ref_past($meta_attr),
+                $cont_past
+            );
+            for %lit_args {
+                $create_call.push(PAST::Val.new( :value($_.value), :named($_.key) ));
+            }
+            for %obj_args {
+                my $lookup := self.get_object_sc_ref_past($_.value);
+                $lookup.named($_.key);
+                $create_call.push($lookup);
+            }
+            self.add_event(:deserialize_past(
+                self.add_object_to_cur_sc_past($slot, $create_call)));
 
-        # Emit code to add attribute when deserializing.
-        my $obj_slot_past := self.get_object_sc_ref_past($obj);
-        self.add_event(:deserialize_past(PAST::Op.new(
-            :pasttype('callmethod'), :name('add_attribute'),
-            PAST::Op.new( :pirop('get_how PP'), $obj_slot_past ),
-            $obj_slot_past,
-            self.get_object_sc_ref_past($attr)
-        )));
-        
+            # Emit code to add attribute when deserializing.
+            my $obj_slot_past := self.get_object_sc_ref_past($obj);
+            self.add_event(:deserialize_past(PAST::Op.new(
+                :pasttype('callmethod'), :name('add_attribute'),
+                PAST::Op.new( :pirop('get_how PP'), $obj_slot_past ),
+                $obj_slot_past,
+                self.get_object_sc_ref_past($attr)
+            )));
+        }
+
         # Return attribute that was built.
         $attr
     }
@@ -1097,15 +1145,17 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         $obj.HOW."$meta_method_name"($obj, $name, $code_object);
         
         # Add call to add the method at deserialization time.
-        my $slot_past := self.get_object_sc_ref_past($obj);
-        self.add_event(
-            :deserialize_past(PAST::Op.new(
-                :pasttype('callmethod'), :name($meta_method_name),
-                PAST::Op.new( :pirop('get_how PP'), $slot_past ),
-                $slot_past,
-                $name,
-                self.get_object_sc_ref_past($code_object)
-            )));
+        if self.is_precompilation_mode() {
+            my $slot_past := self.get_object_sc_ref_past($obj);
+            self.add_event(
+                :deserialize_past(PAST::Op.new(
+                    :pasttype('callmethod'), :name($meta_method_name),
+                    PAST::Op.new( :pirop('get_how PP'), $slot_past ),
+                    $slot_past,
+                    $name,
+                    self.get_object_sc_ref_past($code_object)
+                )));
+        }
     }
     
     # Handles setting the body block code for a role.
@@ -1114,14 +1164,16 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         $obj.HOW.set_body_block($obj, $code_object);
         
         # Add call to do it at deserialization time.
-        my $slot_past := self.get_object_sc_ref_past($obj);
-        self.add_event(:deserialize_past(PAST::Op.new(
-            :pasttype('callmethod'), :name('set_body_block'),
-            PAST::Op.new( :pirop('get_how PP'), $slot_past ),
-            $slot_past,
-            self.get_object_sc_ref_past($code_object)
-        )));
-        
+        if self.is_precompilation_mode() {
+            my $slot_past := self.get_object_sc_ref_past($obj);
+            self.add_event(:deserialize_past(PAST::Op.new(
+                :pasttype('callmethod'), :name('set_body_block'),
+                PAST::Op.new( :pirop('get_how PP'), $slot_past ),
+                $slot_past,
+                self.get_object_sc_ref_past($code_object)
+            )));
+        }
+
         # Compile it immediately (we always compile role bodies as
         # early as possible, but then assume they don't need to be
         # re-compiled and re-fixed up at startup).
@@ -1134,12 +1186,14 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         $obj.HOW.compose($obj);
         
         # Emit code to do the composition when deserializing.
-        my $slot_past := self.get_object_sc_ref_past($obj);
-        self.add_event(:deserialize_past(PAST::Op.new(
-            :pasttype('callmethod'), :name('compose'),
-            PAST::Op.new( :pirop('get_how PP'), $slot_past ),
-            $slot_past
-        )));
+        if self.is_precompilation_mode() {
+            my $slot_past := self.get_object_sc_ref_past($obj);
+            self.add_event(:deserialize_past(PAST::Op.new(
+                :pasttype('callmethod'), :name('compose'),
+                PAST::Op.new( :pirop('get_how PP'), $slot_past ),
+                $slot_past
+            )));
+        }
     }
     
     # Builds a curried role with the specified arguments.
@@ -1167,21 +1221,23 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         my $slot := self.add_object($curried);
         
         # Serialize call.
-        my $setup_call := PAST::Op.new(
-            :pasttype('callmethod'), :name('new_type'),
-            self.get_object_sc_ref_past($curryhow),
-            self.get_object_sc_ref_past($role)
-        );
-        for @pos_args {
-            $setup_call.push(self.get_object_sc_ref_past($_));
+        if self.is_precompilation_mode() {
+            my $setup_call := PAST::Op.new(
+                :pasttype('callmethod'), :name('new_type'),
+                self.get_object_sc_ref_past($curryhow),
+                self.get_object_sc_ref_past($role)
+            );
+            for @pos_args {
+                $setup_call.push(self.get_object_sc_ref_past($_));
+            }
+            for %named_args {
+                $setup_call.push(my $arg := self.get_object_sc_ref_past($_.value));
+                $arg.named($_.key);
+            }
+            self.add_event(:deserialize_past(
+                self.add_object_to_cur_sc_past($slot, $setup_call)));
         }
-        for %named_args {
-            $setup_call.push(my $arg := self.get_object_sc_ref_past($_.value));
-            $arg.named($_.key);
-        }
-        self.add_event(:deserialize_past(
-            self.set_slot_past($slot, self.set_cur_sc($setup_call))));
-        
+
         return $curried;
     }
     
@@ -1195,20 +1251,22 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         
         # Add an event. There's no fixup to do, just a type object to create
         # on deserialization.
-        my $setup_call := PAST::Op.new(
-            :pasttype('callmethod'), :name('new_type'),
-            self.get_object_sc_ref_past($how),
-            self.get_object_sc_ref_past($refinement),
-            self.get_object_sc_ref_past($refinee)
-        );
-        $setup_call[1].named('refinement');
-        $setup_call[2].named('refinee');
-        if pir::defined($name) {
-            $setup_call.push(PAST::Val.new( :value($name), :named('name') ));
+        if self.is_precompilation_mode() {
+            my $setup_call := PAST::Op.new(
+                :pasttype('callmethod'), :name('new_type'),
+                self.get_object_sc_ref_past($how),
+                self.get_object_sc_ref_past($refinement),
+                self.get_object_sc_ref_past($refinee)
+            );
+            $setup_call[1].named('refinement');
+            $setup_call[2].named('refinee');
+            if pir::defined($name) {
+                $setup_call.push(PAST::Val.new( :value($name), :named('name') ));
+            }
+            self.add_event(:deserialize_past(
+                self.add_object_to_cur_sc_past($slot, $setup_call)));
         }
-        self.add_event(:deserialize_past(
-            self.set_slot_past($slot, self.set_cur_sc($setup_call))));
-        
+
         # Result is just the object.
         return $mo;
     }
@@ -1227,29 +1285,31 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         $enum_type_obj.HOW.add_enum_value($enum_type_obj, $val);
         
         # Generate deserialization code.
-        my $enum_type_obj_ref := self.get_object_sc_ref_past($enum_type_obj);
-        my $base_type_ref := self.get_object_sc_ref_past($base_type);
-        my $key_ref := self.get_object_sc_ref_past($key);
-        my $val_ref := self.get_object_sc_ref_past($val);
-        self.add_event(:deserialize_past(PAST::Stmts.new(            
-            self.set_slot_past($slot, self.set_cur_sc(
-                PAST::Op.new( :pirop('repr_box_int PiP'), $value, $enum_type_obj_ref )
-            )),
-            PAST::Op.new(
-                :pirop('setattribute vPPsP'),
-                $val_ref, $enum_type_obj_ref, '$!key', $key_ref
-            ),
-            PAST::Op.new(
-                :pirop('setattribute vPPsP'),
-                $val_ref, $enum_type_obj_ref, '$!value',
-                PAST::Op.new( :pirop('repr_box_int PiP'), $value, $base_type_ref )
-            ),
-            PAST::Op.new(
-                :pasttype('callmethod'), :name('add_enum_value'),
-                PAST::Op.new( :pirop('get_how PP'), $enum_type_obj_ref ),
-                $enum_type_obj_ref, $val
-            ))));
-            
+        if self.is_precompilation_mode() {
+            my $enum_type_obj_ref := self.get_object_sc_ref_past($enum_type_obj);
+            my $base_type_ref := self.get_object_sc_ref_past($base_type);
+            my $key_ref := self.get_object_sc_ref_past($key);
+            my $val_ref := self.get_object_sc_ref_past($val);
+            self.add_event(:deserialize_past(PAST::Stmts.new(            
+                self.add_object_to_cur_sc_past($slot,
+                    PAST::Op.new( :pirop('repr_box_int PiP'), $value, $enum_type_obj_ref )
+                ),
+                PAST::Op.new(
+                    :pirop('setattribute vPPsP'),
+                    $val_ref, $enum_type_obj_ref, '$!key', $key_ref
+                ),
+                PAST::Op.new(
+                    :pirop('setattribute vPPsP'),
+                    $val_ref, $enum_type_obj_ref, '$!value',
+                    PAST::Op.new( :pirop('repr_box_int PiP'), $value, $base_type_ref )
+                ),
+                PAST::Op.new(
+                    :pasttype('callmethod'), :name('add_enum_value'),
+                    PAST::Op.new( :pirop('get_how PP'), $enum_type_obj_ref ),
+                    $enum_type_obj_ref, $val
+                ))));
+        }
+
         # Result is the value.
         $val
     }
@@ -1263,18 +1323,20 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         $trait_sub(|@pos_args, |%named_args);
         
         # Serialize call to it.
-        my $call_past := PAST::Op.new(
-            :pasttype('call'),
-            self.get_object_sc_ref_past($trait_sub));
-        for @pos_args {
-            $call_past.push(self.get_object_sc_ref_past($_));
+        if self.is_precompilation_mode() {
+            my $call_past := PAST::Op.new(
+                :pasttype('call'),
+                self.get_object_sc_ref_past($trait_sub));
+            for @pos_args {
+                $call_past.push(self.get_object_sc_ref_past($_));
+            }
+            for %named_args {
+                my $lookup := self.get_object_sc_ref_past($_.value);
+                $lookup.named($_.key);
+                $call_past.push($lookup);
+            }
+            self.add_event(:deserialize_past($call_past));
         }
-        for %named_args {
-            my $lookup := self.get_object_sc_ref_past($_.value);
-            $lookup.named($_.key);
-            $call_past.push($lookup);
-        }
-        self.add_event(:deserialize_past($call_past));
     }
     
     # Some things get cloned many times with a lexical scope that
@@ -1285,8 +1347,10 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         # one and install it.
         my $fixup_list := pir::new__Ps('ResizablePMCArray');
         my $slot := self.add_code($fixup_list);
-        self.add_event(:deserialize_past(
-            self.set_slot_past($slot, PAST::Op.new( :pasttype('list') ))));
+        if self.is_precompilation_mode() {
+            self.add_event(:deserialize_past(
+                self.set_slot_past($slot, PAST::Op.new( :pasttype('list') ))));
+        }
 
         # Set up capturing code.
         my $capturer := self.cur_lexpad();
