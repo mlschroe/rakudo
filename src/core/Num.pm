@@ -27,7 +27,9 @@ my class Num {
         my ($a, $b) = 1, $q;
         my ($c, $d) = 0, 1;
 
-        while $r != 0 && abs($num - ($b/$d)) > $epsilon {
+        my $prev-error = self;
+        while $r != 0 && $epsilon < abs($num - ($b/$d)) < $prev-error {
+            $prev-error = abs($num - ($b/$d));
             ($r, $q) = modf(1/$r);
 
             ($a, $b) = ($b, $q*$b + $a);
