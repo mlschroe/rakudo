@@ -536,6 +536,14 @@ class Perl6::Actions is HLL::Actions {
         if $<statementlist> {
             my $past := $<statementlist>.ast;
             my $BLOCK := $*CURPAD;
+            if $BLOCK<enter_phasers> {
+                my @stmts;
+                for $BLOCK<enter_phasers> {
+                    @stmts.push(PAST::Op.new( :pasttype('call'), $_));
+                }
+                @stmts.push($past);
+                $past := PAST::Stmts.new( :node($/), |@stmts );
+            }
             $BLOCK.push($past);
             $BLOCK.node($/);
             make $BLOCK;
@@ -787,6 +795,21 @@ class Perl6::Actions is HLL::Actions {
     method statement_prefix:sym<CHECK>($/) { $*ST.add_phaser($/, ($<blorst>.ast)<code_object>, 'CHECK'); }
     method statement_prefix:sym<INIT>($/)  { $*ST.add_phaser($/, ($<blorst>.ast)<code_object>, 'INIT'); }
     method statement_prefix:sym<END>($/)   { $*ST.add_phaser($/, ($<blorst>.ast)<code_object>, 'END'); }
+
+    method statement_prefix:sym<ENTER>($/) {
+        my $lexpad := $*ST.cur_lexpad();
+        if (!$lexpad<enter_phasers>) {
+            $lexpad<enter_phasers> := [];
+        }
+        $lexpad<enter_phasers>.push($<blorst>.ast);
+    }
+    method statement_prefix:sym<LEAVE>($/) {
+        my $lexpad := $*ST.cur_lexpad();
+        if (!$lexpad<leave_phasers>) {
+            $lexpad<leave_phasers> := [];
+        }
+        $lexpad<leave_phasers>.unshift($<blorst>.ast);
+    }
 
     method statement_prefix:sym<DOC>($/)   {
         $*ST.add_phaser($/, ($<blorst>.ast)<code_object>, ~$<phase>)

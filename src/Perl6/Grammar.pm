@@ -755,10 +755,8 @@ grammar Perl6::Grammar is HLL::Grammar {
             <.panic("FIRST phaser not yet implemented")> }
     token statement_prefix:sym<LAST>  { <sym> <blorst>
             <.panic("LAST phaser not yet implemented")> }
-    token statement_prefix:sym<ENTER> { <sym> <blorst>
-            <.panic("ENTER phaser not yet implemented")> }
-    token statement_prefix:sym<LEAVE> { <sym> <blorst>
-            <.panic("LEAVE phaser not yet implemented")> }
+    token statement_prefix:sym<ENTER> { <sym> <blorst> }
+    token statement_prefix:sym<LEAVE> { <sym> <blorst> }
     token statement_prefix:sym<PRE> { <sym> <blorst>
             <.panic("PRE phaser not yet implemented")> }
     token statement_prefix:sym<POST> { <sym> <blorst>
