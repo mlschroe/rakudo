@@ -849,7 +849,7 @@ class Perl6::Actions is HLL::Actions {
                 PAST::Op.new(:pirop('perl6_container_store__0PP'),
                     PAST::Var.new(:name<$!>, :scope<lexical_6model>),
                     PAST::Op.new(:name<&EXCEPTION>, :pasttype<call>,
-                        PAST::Op.new(:inline("    .get_results (%r)\n    finalize %r")))));
+                        PAST::Op.new(:inline("    .get_results (%r)\n    finalize %r\n    perl6_invoke_catchhandler %0, %r"), PAST::Var.new(:scope<register>) ))));
 
             # Otherwise, put Mu into $!.
             $past.push(
@@ -3771,7 +3771,7 @@ class Perl6::Actions is HLL::Actions {
             @handlers.push(
                 PAST::Op.new(
                     :handle_types('BREAK'),
-                    :inline("    perl6_type_check_return_value %0\n    .return (%0)"),
+                    :inline("    perl6_type_check_return_value %0\n    perl6_returncc %0"),
                     PAST::Var.new(
                         :scope('keyed'),
                         PAST::Op.new(:inline("    .get_results (%r)\n    finalize %r")),
@@ -3870,7 +3870,7 @@ class Perl6::Actions is HLL::Actions {
             ),
             PAST::Op.new( :pirop('finalize vP'),
                 PAST::Var.new( :scope('register'), :name('exception'))),
-            PAST::Op.new(:inline("    .get_results (%r)\n    perl6_type_check_return_value %r\n    .return (%r)"))
+            PAST::Op.new(:inline("    .get_results (%r)\n    perl6_type_check_return_value %r\n    perl6_returncc %r"))
         );
 
         #install handler

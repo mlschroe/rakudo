@@ -724,6 +724,15 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         # Stash it under the PAST block sub ID.
         %!sub_id_to_code_object{$code_past.subid()} := $code;
         
+        # Add leave_phasers pirop if needed
+        if ($code_past<leave_phasers>) {
+            my $last := +$code_past.list();
+            $code_past[$last - 1] := PAST::Op.new(
+                :inline("    perl6_returncc %0\n    %r = %0"),
+                $code_past[$last - 1],
+            );
+        }
+
         # For now, install stub that will dynamically compile the code if
         # we ever try to run it during compilation.
         my $precomp;
@@ -834,6 +843,19 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
                     PAST::Val.new( :value($code_past) )));
             $des.push($set);
             $fixups.push($set);
+        }
+
+        # Put all leave phasers into $!leave_phasers
+        if ($code_past<leave_phasers>) {
+            my $phasers_rpa := pir::new__Ps('ResizablePMCArray');
+            my @phasers;
+            for ($code_past<leave_phasers>) {
+                $phasers_rpa.push($_<code_object>);
+                @phasers.push(PAST::Val.new( :value($_<past_block>) ));
+            }
+            pir::setattribute__vPPsP($code, $code_type, '$!leave_phasers', $phasers_rpa);
+            my $set := PAST::Op.new( :pasttype('list'), |@phasers);
+            $des.push(self.set_attribute($code, $code_type, '$!leave_phasers', $set));
         }
             
         self.add_event(:deserialize_past($des), :fixup_past($fixups));

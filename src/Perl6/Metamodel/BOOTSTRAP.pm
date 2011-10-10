@@ -372,6 +372,7 @@ Code.HOW.add_attribute(Code, BOOTSTRAPATTR.new(:name<$!signature>, :type(Mu)));
 Code.HOW.add_attribute(Code, BOOTSTRAPATTR.new(:name<$!dispatchees>, :type(Mu)));
 Code.HOW.add_attribute(Code, BOOTSTRAPATTR.new(:name<$!dispatcher_cache>, :type(Mu)));
 Code.HOW.add_attribute(Code, BOOTSTRAPATTR.new(:name<$!dispatcher>, :type(Mu)));
+Code.HOW.add_attribute(Code, BOOTSTRAPATTR.new(:name<$!leave_phasers>, :type(Mu)));
 
 # Need multi-dispatch related methods and clone in here, plus
 # generics instantiation.
