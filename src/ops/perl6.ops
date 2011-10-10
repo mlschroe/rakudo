@@ -126,7 +126,7 @@ static void rewind_to_ctx(PARROT_INTERP, ARGIN_NULLOK(PMC *ctx), ARGIN_NULLOK(PM
     while (ctx != basectx) {
         parrot_sub = Parrot_pcc_get_sub(interp, ctx);
         GETATTR_Sub_multi_signature(interp, parrot_sub, perl6_code);
-        if (!PMC_IS_NULL(perl6_code)) {
+        if (!PMC_IS_NULL(perl6_code) && perl6_code->vtable->base_type == smo_id) {
             exceptions = run_leave_phasers(interp, ctx, perl6_code, exceptions);
         }
         ctx = Parrot_pcc_get_caller_ctx(interp, ctx);
@@ -1339,7 +1339,8 @@ inline op perl6_invoke_catchhandler(invar PMC, in PMC) :flow {
     }
     if (PMC_IS_NULL(p)) {
         /* no function provided, return immediately */
-	rewind_to_ctx(interp, ectx, ctx);
+        PMC *basectx = find_common_ctx(interp, ctx, ectx);
+        rewind_to_ctx(interp, ectx, basectx);
         Parrot_pcc_set_context(interp, ctx);
         goto NEXT();
     } else {
