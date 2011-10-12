@@ -53,16 +53,15 @@ static PMC *find_common_ctx(PARROT_INTERP, ARGIN_NULLOK(PMC *ctx1), ARGIN_NULLOK
     for (ctx = ctx2; !PMC_IS_NULL(ctx); ctx = Parrot_pcc_get_caller_ctx(interp, ctx), depth2++)
         if (ctx == ctx1)
             return ctx;
-    for (; depth1 > depth2; depth1++)
+    for (; depth1 > depth2; depth2++)
         ctx1 = Parrot_pcc_get_caller_ctx(interp, ctx1);
-    for (; depth2 > depth1; depth2++)
+    for (; depth2 > depth1; depth1++)
         ctx2 = Parrot_pcc_get_caller_ctx(interp, ctx2);
-    for (;;) {
-        if (ctx1 == ctx2)
-            return ctx1;
+    while (ctx1 != ctx2) {
         ctx1 = Parrot_pcc_get_caller_ctx(interp, ctx1);
         ctx2 = Parrot_pcc_get_caller_ctx(interp, ctx2);
     }
+    return ctx1;
 }
 
 static PMC *run_leave_phasers(PARROT_INTERP, PMC *ctx, PMC *perl6_code, PMC *exceptions)
@@ -1322,21 +1321,12 @@ inline op perl6_invoke_catchhandler(invar PMC, in PMC) :flow {
 
     VTABLE_set_pointer(interp, cont, dest);
     Parrot_pcc_set_pc(interp, ctx, dest);
-    /* now the tricky part, restore exception context */
+    /* now the tricky part, restore the exception context */
     GETATTR_Exception_thrower(interp, $2, ectx);
-    if (!PMC_IS_NULL(ectx) && ectx != ctx) {
-        /* make sure that the current context is reachable, just in case... */
-        PMC *cctx = ectx;
-        for (; !PMC_IS_NULL(cctx); cctx = Parrot_pcc_get_caller_ctx(interp, cctx))
-            if (cctx == ctx)
-                break;
-        if (cctx == ctx) {
-            /* ok, found it. now change the current context */
-            Parrot_pcc_set_context(interp, ectx);
-        }
-    } else {
+    if (PMC_IS_NULL(ectx))
         ectx = ctx;
-    }
+    if (ectx != ctx)
+	Parrot_pcc_set_context(interp, ectx);
     if (PMC_IS_NULL(p)) {
         /* no function provided, return immediately */
         PMC *basectx = find_common_ctx(interp, ctx, ectx);
