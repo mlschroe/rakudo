@@ -728,7 +728,7 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         if ($code_past<leave_phasers>) {
             my $last := +$code_past.list();
             $code_past[$last - 1] := PAST::Op.new(
-                :inline("    perl6_returncc %0\n    %r = %0"),
+                :pirop('perl6_returncc 0P'),
                 $code_past[$last - 1],
             );
         }
@@ -849,6 +849,10 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         if ($code_past<leave_phasers>) {
             my $phasers_rpa := pir::new__Ps('ResizablePMCArray');
             my @phasers;
+            if ($code_past<have_keep_or_undo_phaser>) {
+                $phasers_rpa.push(nqp::null);
+                @phasers.push(PAST::Op.new( :pirop("null__Pv") ));
+            }
             for ($code_past<leave_phasers>) {
                 $phasers_rpa.push($_<code_object>);
                 @phasers.push(PAST::Val.new( :value($_<past_block>) ));

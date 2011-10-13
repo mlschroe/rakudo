@@ -810,6 +810,36 @@ class Perl6::Actions is HLL::Actions {
         }
         $lexpad<leave_phasers>.unshift($<blorst>.ast);
     }
+    method statement_prefix:sym<KEEP>($/) {
+        my $lexpad := $*ST.cur_lexpad();
+        if (!$lexpad<leave_phasers>) {
+            $lexpad<leave_phasers> := [];
+        }
+        my $ast := $<blorst>.ast;
+        # use returncc so that no leave phasers get triggered
+        $ast<past_block>[0] := PAST::Op.new( :pasttype('unless'), 
+            PAST::Var.new(:scope('parameter')),
+            PAST::Op.new(:inline("    returncc")),
+            $ast<past_block>[0]
+        );
+        $lexpad<leave_phasers>.unshift($ast);
+        $lexpad<have_keep_or_undo_phaser> := 1;
+    }
+    method statement_prefix:sym<UNDO>($/) {
+        my $lexpad := $*ST.cur_lexpad();
+        if (!$lexpad<leave_phasers>) {
+            $lexpad<leave_phasers> := [];
+        }
+        my $ast := $<blorst>.ast;
+        # use returncc so that no leave phasers get triggered
+        $ast<past_block>[0] := PAST::Op.new( :pasttype('if'), 
+            PAST::Var.new(:scope('parameter')),
+            PAST::Op.new(:inline("    returncc")),
+            $ast<past_block>[0]
+        );
+        $lexpad<leave_phasers>.unshift($ast);
+        $lexpad<have_keep_or_undo_phaser> := 1;
+    }
 
     method statement_prefix:sym<DOC>($/)   {
         $*ST.add_phaser($/, ($<blorst>.ast)<code_object>, ~$<phase>)

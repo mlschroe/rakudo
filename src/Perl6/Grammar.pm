@@ -751,12 +751,16 @@ grammar Perl6::Grammar is HLL::Grammar {
     token statement_prefix:sym<CHECK> { <sym> <blorst> }
     token statement_prefix:sym<INIT>  { <sym> <blorst> }
     token statement_prefix:sym<END>   { <sym> <blorst> }
-    token statement_prefix:sym<FIRST> { <sym> <blorst>
-            <.panic("FIRST phaser not yet implemented")> }
-    token statement_prefix:sym<LAST>  { <sym> <blorst>
-            <.panic("LAST phaser not yet implemented")> }
     token statement_prefix:sym<ENTER> { <sym> <blorst> }
     token statement_prefix:sym<LEAVE> { <sym> <blorst> }
+    token statement_prefix:sym<KEEP>  { <sym> <blorst> }
+    token statement_prefix:sym<UNDO>  { <sym> <blorst> }
+    token statement_prefix:sym<FIRST> { <sym> <blorst>
+            <.panic("FIRST phaser not yet implemented")> }
+    token statement_prefix:sym<NEXT>  { <sym> <blorst>
+            <.panic("NEXT phaser not yet implemented")> }
+    token statement_prefix:sym<LAST>  { <sym> <blorst>
+            <.panic("LAST phaser not yet implemented")> }
     token statement_prefix:sym<PRE> { <sym> <blorst>
             <.panic("PRE phaser not yet implemented")> }
     token statement_prefix:sym<POST> { <sym> <blorst>
