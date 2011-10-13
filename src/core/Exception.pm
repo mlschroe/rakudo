@@ -83,11 +83,7 @@ do {
         if ($type == nqp::p6box_i(pir::const::CONTROL_OK)) {
             my Mu $err := pir::getstderr__P();
             my $msg = nqp::p6box_s(nqp::atkey($ex, 'message'));
-            if ($msg) {
-                $err.print: "Warning: $msg\n";
-            } else {
-                $err.print: "Warning\n";
-            }
+            $err.print: $msg ?? "$msg\n" !! "Warning\n";
             my $resume := nqp::atkey($ex, 'resume');
             if ($resume) {
                 $resume();
