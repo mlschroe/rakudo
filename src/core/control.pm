@@ -55,24 +55,27 @@ my &take := -> |$ {
 };
 
 my &last := -> |$ { 
-    my $parcel := 
-        &RETURN-PARCEL(nqp::p6parcel(pir::perl6_current_args_rpa__PP(), Nil));
-    THROW(pir::perl6_decontainerize__PP($parcel), 
-          pir::const::CONTROL_LOOP_LAST) 
+    pir::perl6_throw_loop_exception__vi(pir::const::CONTROL_LOOP_LAST);
+#    my $parcel := 
+#        &RETURN-PARCEL(nqp::p6parcel(pir::perl6_current_args_rpa__PP(), Nil));
+#    THROW(pir::perl6_decontainerize__PP($parcel), 
+#          pir::const::CONTROL_LOOP_LAST) 
 };
 
 my &next := -> |$ { 
-    my $parcel := 
-        &RETURN-PARCEL(nqp::p6parcel(pir::perl6_current_args_rpa__PP(), Nil));
-    THROW(pir::perl6_decontainerize__PP($parcel), 
-          pir::const::CONTROL_LOOP_NEXT) 
+    pir::perl6_throw_loop_exception__vi(pir::const::CONTROL_LOOP_NEXT);
+#    my $parcel := 
+#        &RETURN-PARCEL(nqp::p6parcel(pir::perl6_current_args_rpa__PP(), Nil));
+#    THROW(pir::perl6_decontainerize__PP($parcel), 
+#          pir::const::CONTROL_LOOP_NEXT) 
 };
 
 my &redo := -> |$ { 
-    my $parcel := 
-        &RETURN-PARCEL(nqp::p6parcel(pir::perl6_current_args_rpa__PP(), Nil));
-    THROW(pir::perl6_decontainerize__PP($parcel), 
-          pir::const::CONTROL_LOOP_REDO) 
+    pir::perl6_throw_loop_exception__vi(pir::const::CONTROL_LOOP_REDO);
+#    my $parcel := 
+#        &RETURN-PARCEL(nqp::p6parcel(pir::perl6_current_args_rpa__PP(), Nil));
+#    THROW(pir::perl6_decontainerize__PP($parcel), 
+#          pir::const::CONTROL_LOOP_REDO) 
 };
 
 my &succeed := -> |$ { 

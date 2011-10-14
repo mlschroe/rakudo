@@ -1414,6 +1414,34 @@ inline op perl6_return_from_routine(in PMC) :flow {
     goto ADDRESS(dest);
 }
 
+/*
+
+=item perl6_throw_loop_exception(in PMC)
+
+This ugly hack is currently needed so that next/last/redo exceptions
+trigger enter/leave phasers. We could also do this by patching PCT.
+In the future, next/last/redo may no longer use exceptions but some
+lexcial mechanism, then this op is no longer needded.
+
+=cut
+
+*/
+inline op perl6_throw_loop_exception(in INT) :base_core {
+    PMC      * ectx = CURRENT_CONTEXT(interp);
+    PMC      * ctx;
+    opcode_t * dest = expr NEXT();
+    PMC      * const exception = Parrot_ex_build_exception(interp, EXCEPT_normal, $1, NULL);
+
+    dest = Parrot_ex_throw_from_op(interp, exception, dest);
+    ctx = CURRENT_CONTEXT(interp);
+    if (ctx != ectx) {
+	PMC *basectx = find_common_ctx(interp, ctx, ectx);
+	Parrot_pcc_set_context(interp, ectx);
+	rewind_to_ctx(interp, ectx, basectx, PMCNULL);
+	Parrot_pcc_set_context(interp, ctx);
+    }
+    goto ADDRESS(dest);
+}
 
 /*
  * Local variables:
