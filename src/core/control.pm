@@ -89,6 +89,12 @@ my &proceed := -> {
     THROW(Nil, pir::const::CONTROL_CONTINUE)
 }
 
+my &leave := -> |$ { 
+    my $parcel := 
+        &RETURN-PARCEL(nqp::p6parcel(pir::perl6_current_args_rpa__PP(), Nil));
+    pir::perl6_leave_caller__vP($parcel);
+}
+
 my &callwith := -> *@pos, *%named {
     my Mu $dispatcher := pir::perl6_find_dispatcher__P();
     $dispatcher.exhausted ?? Nil !!

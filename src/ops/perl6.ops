@@ -1484,6 +1484,49 @@ inline op perl6_throw_loop_exception(in INT) :base_core {
     goto ADDRESS(dest);
 }
 
+inline op perl6_leave_caller(in PMC) :flow {
+    opcode_t * dest       = expr NEXT();
+    PMC      * call_sig   = build_sig_object(interp, PMCNULL, "P", $1);
+    PMC      * ctx        = CURRENT_CONTEXT(interp);
+    PMC      * cctx       = Parrot_pcc_get_caller_ctx(interp, ctx);
+    PMC      * cont       = PMCNULL;
+    PMC      * basectx;
+    PMC      * parrot_sub = PMCNULL;
+    PMC      * perl6_code = PMCNULL;
+    PMC      * sig_pmc;
+    PMC      * rtype;
+
+    parrot_sub = Parrot_pcc_get_sub(interp, cctx);
+    if (PMC_IS_NULL(parrot_sub)) {
+        Parrot_ex_throw_from_c_args(interp, NULL, EXCEPTION_INVALID_OPERATION,
+            "Not in a sub");
+    }
+    GETATTR_Sub_multi_signature(interp, parrot_sub, perl6_code);
+    if (PMC_IS_NULL(perl6_code) || perl6_code->vtable->base_type != smo_id) {
+        Parrot_ex_throw_from_c_args(interp, NULL, EXCEPTION_INVALID_OPERATION,
+            "Not in a Code block");
+    }
+    sig_pmc = ((Rakudo_Code *)PMC_data(perl6_code))->signature;
+    rtype = ((Rakudo_Signature *)PMC_data(sig_pmc))->rtype;
+    if (!PMC_IS_NULL(rtype)) {
+        PMC *decont_value;
+        decont_value = Rakudo_cont_decontainerize(interp, $1);
+        if (!STABLE(decont_value)->type_check(interp, decont_value, rtype)) {
+            /* XXX Awesomize. */
+            Parrot_ex_throw_from_c_args(interp, NULL, EXCEPTION_INVALID_OPERATION,
+                "Type check failed for return value");
+        }
+    }
+    cont = Parrot_pcc_get_continuation(intetp, cctx);
+    cctx = PMCNULL;
+    GETATTR_Continuation_to_ctx(interp, cont, cctx);
+    basectx = find_common_ctx(interp, ctx, cctx);
+    rewind_to_ctx(interp, ctx, basectx, $1);
+    Parrot_pcc_set_signature(interp, ctx, call_sig);
+    dest = VTABLE_invoke(interp, cont, dest);
+    goto ADDRESS(dest);
+}
+
 /*
  * Local variables:
  *   c-file-style: "parrot"
