@@ -130,11 +130,13 @@ static void rewind_to_ctx(PARROT_INTERP, ARGIN_NULLOK(PMC *ctx), ARGIN_NULLOK(PM
     PMC    *parrot_sub;
     PMC    *perl6_code;
     PMC *exceptions = PMCNULL;
-    while (ctx != basectx) {
+    while (!PMC_IS_NULL(ctx) && ctx != basectx) {
         parrot_sub = Parrot_pcc_get_sub(interp, ctx);
-        GETATTR_Sub_multi_signature(interp, parrot_sub, perl6_code);
-        if (!PMC_IS_NULL(perl6_code) && perl6_code->vtable->base_type == smo_id) {
-            exceptions = run_leave_phasers(interp, ctx, perl6_code, result, exceptions);
+        if (!PMC_IS_NULL(parrot_sub)) {
+            GETATTR_Sub_multi_signature(interp, parrot_sub, perl6_code);
+            if (!PMC_IS_NULL(perl6_code) && perl6_code->vtable->base_type == smo_id) {
+                exceptions = run_leave_phasers(interp, ctx, perl6_code, result, exceptions);
+            }
         }
         ctx = Parrot_pcc_get_caller_ctx(interp, ctx);
     }

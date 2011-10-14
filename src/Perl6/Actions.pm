@@ -3867,6 +3867,12 @@ class Perl6::Actions is HLL::Actions {
             PAST::Var.new( :scope('lexical_6model'), :name('$!'), :isdecl(1) ),
             PAST::Var.new( :scope('lexical_6model'), :name('$/'), :isdecl(1) ),
         );
+        
+        if ($handler<past_block><leave_phasers>) {
+	    # undo leave phaser handling
+	    my $last := +$handler<past_block>.list();
+	    $handler<past_block>[$last - 1] := $handler<past_block>[$last - 1][0];
+	}
         $handler<past_block>[1].unshift($handler_preamble);
 
         # rethrow the exception if we reach the end of the handler
