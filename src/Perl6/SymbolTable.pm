@@ -727,10 +727,13 @@ class Perl6::SymbolTable is HLL::Compiler::SerializationContextBuilder {
         # Add leave_phasers pirop if needed
         if ($code_past<leave_phasers>) {
             my $last := +$code_past.list();
-            $code_past[$last - 1] := PAST::Op.new(
-                :pirop('perl6_returncc 0P'),
-                $code_past[$last - 1],
-            );
+            # $last is 1 for mainline
+            if ($last > 1) {
+                $code_past[$last - 1] := PAST::Op.new(
+                    :pirop('perl6_returncc 0P'),
+                    $code_past[$last - 1],
+                );
+            }
         }
 
         # For now, install stub that will dynamically compile the code if

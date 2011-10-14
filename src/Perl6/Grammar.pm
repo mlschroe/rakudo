@@ -446,7 +446,6 @@ grammar Perl6::Grammar is HLL::Grammar {
                 $*ST.install_lexical_symbol($*UNIT, 'GLOBALish', $*GLOBALish);
                 $*ST.install_lexical_symbol($*UNIT, 'EXPORT', $*EXPORT);
                 $*ST.install_lexical_symbol($*UNIT, '$?PACKAGE', $*PACKAGE);
-                $*ST.create_code_object($*UNIT, 'Block', $*ST.create_signature([]));
             }
         }
         
@@ -458,6 +457,9 @@ grammar Perl6::Grammar is HLL::Grammar {
         [ $ || <.panic: 'Confused'> ]
         
         {
+            unless %*COMPILING<%?OPTIONS><setting> eq 'NULL' {
+                $*ST.create_code_object($*UNIT, 'Block', $*ST.create_signature([]));
+            }
             $*POD_PAST := $*ST.add_constant(
                 'Array', 'type_new', |$*POD_BLOCKS
             );

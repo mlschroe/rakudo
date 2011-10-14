@@ -124,6 +124,25 @@ class Perl6::Actions is HLL::Actions {
             $*POD_PAST,
             $<statementlist>.ast,
         );
+       
+        # add enter phasers
+        if ($unit<enter_phasers>) {
+            my @stmts;
+            for $unit<enter_phasers> {
+                @stmts.push(PAST::Op.new( :pasttype('call'), $_));
+            }
+            @stmts.push($mainline);
+            $mainline := PAST::Stmts.new( :node($/), |@stmts );
+        }
+
+        # add leave phasers
+        if ($unit<leave_phasers>) {
+            my $last := +$mainline.list();
+            $mainline[$last - 1] := PAST::Op.new(
+                :pirop('perl6_returncc 0P'),
+                $mainline[$last - 1],
+            );
+	}
 
         if %*COMPILING<%?OPTIONS><p> { # also covers the -np case, like Perl 5
             $mainline := wrap_option_p_code($mainline);
