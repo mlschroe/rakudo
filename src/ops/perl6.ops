@@ -187,6 +187,37 @@ static void rewind_to_ctx(PARROT_INTERP, ARGIN_NULLOK(PMC *ctx), ARGIN_NULLOK(PM
     }
 }
 
+static opcode_t *take_continuation(PARROT_INTERP, PMC *cont, PMC *result)
+{
+    PMC *call_sig = build_sig_object(interp, PMCNULL, "P", result);
+    PMC *ctx = CURRENT_CONTEXT(interp);
+    PMC *cctx = PMCNULL;
+    PMC *basectx;
+
+    GETATTR_Continuation_to_ctx(interp, cont, cctx);
+    basectx = find_common_ctx(interp, ctx, cctx);
+    rewind_to_ctx(interp, ctx, basectx, result);
+    Parrot_pcc_set_signature(interp, ctx, call_sig);
+    return VTABLE_invoke(interp, cont, (opcode_t *)NULL);
+}
+
+static void check_returntype(PARROT_INTERP, PMC *perl6_code, PMC *result)
+{
+    PMC *sig_pmc = ((Rakudo_Code *)PMC_data(perl6_code))->signature;
+    PMC *rtype = ((Rakudo_Signature *)PMC_data(sig_pmc))->rtype;
+    if (!PMC_IS_NULL(rtype)) {
+        PMC *decont_value = Rakudo_cont_decontainerize(interp, result);
+        if (!STABLE(decont_value)->type_check(interp, decont_value, rtype)) {
+            /* XXX Awesomize. */
+            Parrot_ex_throw_from_c_args(interp, NULL, EXCEPTION_INVALID_OPERATION,
+                "Type check failed for return value");
+        }
+    }
+}
+
+
+
+/* copied from parrot's sub.c, grrr */
 PARROT_CAN_RETURN_NULL
 PARROT_WARN_UNUSED_RESULT
 static PMC* sub_find_pad(PARROT_INTERP, ARGIN(STRING *lex_name), ARGIN(PMC *ctx))
@@ -878,19 +909,8 @@ inline op perl6_type_check_return_value(in PMC) :base_core {
     PMC *cur_ctx     = CURRENT_CONTEXT(interp);
     PMC *parrot_sub  = Parrot_pcc_get_sub(interp, cur_ctx);
     PMC *p6sub;
-    PMC *sig_pmc;
-    PMC *rtype;
     GETATTR_Sub_multi_signature(interp, parrot_sub, p6sub);
-    sig_pmc = ((Rakudo_Code *)PMC_data(p6sub))->signature;
-    rtype = ((Rakudo_Signature *)PMC_data(sig_pmc))->rtype;
-    if (!PMC_IS_NULL(rtype)) {
-        PMC *decont_value = Rakudo_cont_decontainerize(interp, $1);
-        if (!STABLE(decont_value)->type_check(interp, decont_value, rtype)) {
-            /* XXX Awesomize. */
-            Parrot_ex_throw_from_c_args(interp, NULL, EXCEPTION_INVALID_OPERATION,
-                "Type check failed for return value");
-        }
-    }
+    check_returntype(interp, p6sub, $1);
 }
 
 /*
@@ -1393,45 +1413,49 @@ inline op perl6_invoke_catchhandler(invar PMC, in PMC) :flow {
 }
 
 
+/*
+
+=item perl6_invoke_continuation(invar PMC, in PMC)
+
+Invoke a continuation with an argument, rewinding the call context
+chain and calling leave phasers.
+
+=cut
+
+*/
 inline op perl6_invoke_continuation(invar PMC, in PMC) :flow {
-    PMC      * ctx      = CURRENT_CONTEXT(interp);
-    PMC      * cont     = $1;
-    opcode_t * dest     = expr NEXT();
-    PMC      * cctx;
-    PMC      * basectx;
-    PMC      * call_sig = build_sig_object(interp, PMCNULL, "P", $2);
-
-    GETATTR_Continuation_to_ctx(interp, cont, cctx);
-    basectx = find_common_ctx(interp, ctx, cctx);
-    rewind_to_ctx(interp, ctx, basectx, $2);
-    Parrot_pcc_set_signature(interp, ctx, call_sig);
-    dest = VTABLE_invoke(interp, cont, dest);
-    goto ADDRESS(dest);
+    goto ADDRESS(take_continuation(interp, $1, $2));
 }
 
+
+/*
+
+=item perl6_returncc(in PMC)
+
+This function works like parrot's .return(arg), but it also
+calls associated leave phasers.
+
+=cut
+
+*/
 inline op perl6_returncc(in PMC) :flow {
-    PMC      * ctx      = CURRENT_CONTEXT(interp);
-    PMC      * cont     = Parrot_pcc_get_continuation(interp, ctx);
-    opcode_t * dest     = expr NEXT();
-    PMC      * cctx;
-    PMC      * basectx;
-    PMC      * call_sig = build_sig_object(interp, PMCNULL, "P", $1);
-
-    GETATTR_Continuation_to_ctx(interp, cont, cctx);
-    basectx = find_common_ctx(interp, ctx, cctx);
-    rewind_to_ctx(interp, ctx, basectx, $1);
-    Parrot_pcc_set_signature(interp, ctx, call_sig);
-    dest = VTABLE_invoke(interp, cont, dest);
-    goto ADDRESS(dest);
+    goto ADDRESS(take_continuation(interp, Parrot_pcc_get_continuation(interp, CURRENT_CONTEXT(interp)), $1));
 }
 
+
+/*
+
+=item perl6_return_from_routine(in PMC)
+
+Look fir a lexotic continuation named "RETURN" and call it with the
+specified result value.
+
+=cut
+
+*/
 inline op perl6_return_from_routine(in PMC) :flow {
     PMC * ctx = CURRENT_CONTEXT(interp);
     PMC * cont = PMCNULL;
-    opcode_t * dest     = expr NEXT();
-    PMC      * cctx;
-    PMC      * basectx;
-    PMC      * call_sig = build_sig_object(interp, PMCNULL, "P", $1);
     STRING   * lex_name = Parrot_str_new_constant(interp, "RETURN");
 
     for (ctx = Parrot_pcc_get_caller_ctx(interp, ctx); !PMC_IS_NULL(ctx); ctx = Parrot_pcc_get_caller_ctx(interp, ctx)) {
@@ -1446,14 +1470,9 @@ inline op perl6_return_from_routine(in PMC) :flow {
         Parrot_ex_throw_from_c_args(interp, NULL, EXCEPTION_INVALID_OPERATION,
                 "Attempt to return outside of any Routine");
     }
-    ctx = CURRENT_CONTEXT(interp);
-    GETATTR_Continuation_to_ctx(interp, cont, cctx);
-    basectx = find_common_ctx(interp, ctx, cctx);
-    rewind_to_ctx(interp, ctx, basectx, $1);
-    Parrot_pcc_set_signature(interp, ctx, call_sig);
-    dest = VTABLE_invoke(interp, cont, dest);
-    goto ADDRESS(dest);
+    goto ADDRESS(take_continuation(interp, cont, $1));
 }
+
 
 /*
 
@@ -1484,17 +1503,12 @@ inline op perl6_throw_loop_exception(in INT) :base_core {
     goto ADDRESS(dest);
 }
 
+
 inline op perl6_leave_caller(in PMC) :flow {
-    opcode_t * dest       = expr NEXT();
-    PMC      * call_sig   = build_sig_object(interp, PMCNULL, "P", $1);
     PMC      * ctx        = CURRENT_CONTEXT(interp);
     PMC      * cctx       = Parrot_pcc_get_caller_ctx(interp, ctx);
-    PMC      * cont       = PMCNULL;
-    PMC      * basectx;
     PMC      * parrot_sub = PMCNULL;
     PMC      * perl6_code = PMCNULL;
-    PMC      * sig_pmc;
-    PMC      * rtype;
 
     parrot_sub = Parrot_pcc_get_sub(interp, cctx);
     if (PMC_IS_NULL(parrot_sub)) {
@@ -1506,25 +1520,37 @@ inline op perl6_leave_caller(in PMC) :flow {
         Parrot_ex_throw_from_c_args(interp, NULL, EXCEPTION_INVALID_OPERATION,
             "Not in a Code block");
     }
-    sig_pmc = ((Rakudo_Code *)PMC_data(perl6_code))->signature;
-    rtype = ((Rakudo_Signature *)PMC_data(sig_pmc))->rtype;
-    if (!PMC_IS_NULL(rtype)) {
-        PMC *decont_value;
-        decont_value = Rakudo_cont_decontainerize(interp, $1);
-        if (!STABLE(decont_value)->type_check(interp, decont_value, rtype)) {
-            /* XXX Awesomize. */
-            Parrot_ex_throw_from_c_args(interp, NULL, EXCEPTION_INVALID_OPERATION,
-                "Type check failed for return value");
+    check_returntype(interp, perl6_code, $1);
+    goto ADDRESS(take_continuation(interp, Parrot_pcc_get_continuation(intetp, cctx), $1));
+}
+
+
+inline op perl6_leave_block(in PMC, in PMC) :flow {
+    PMC      * ctx        = CURRENT_CONTEXT(interp);
+    PMC      * cctx       = ctx;
+    PMC      * parrot_sub = PMCNULL;
+    PMC      * perl6_code = PMCNULL;
+    PMC      * target;
+
+    /* see if we can reach a ctx with this code object */
+    /* as a lot of cloning is done we have to check the op pointers ;( */
+    target = Rakudo_cont_decontainerize(interp, $1);
+    while (!PMC_IS_NULL(cctx)) {
+        parrot_sub = Parrot_pcc_get_sub(interp, cctx);
+        if (!PMC_IS_NULL(parrot_sub)) {
+	    GETATTR_Sub_multi_signature(interp, parrot_sub, perl6_code);
+	    if (!PMC_IS_NULL(perl6_code) && perl6_code->vtable->base_type == smo_id && perl6_code == target) {
+		break;
+            }
         }
+        cctx = Parrot_pcc_get_caller_ctx(interp, cctx);
     }
-    cont = Parrot_pcc_get_continuation(intetp, cctx);
-    cctx = PMCNULL;
-    GETATTR_Continuation_to_ctx(interp, cont, cctx);
-    basectx = find_common_ctx(interp, ctx, cctx);
-    rewind_to_ctx(interp, ctx, basectx, $1);
-    Parrot_pcc_set_signature(interp, ctx, call_sig);
-    dest = VTABLE_invoke(interp, cont, dest);
-    goto ADDRESS(dest);
+    if (PMC_IS_NULL(cctx)) {
+        Parrot_ex_throw_from_c_args(interp, NULL, EXCEPTION_INVALID_OPERATION,
+            "Attempt to leave Block from outside");
+    }
+    check_returntype(interp, perl6_code, $2);
+    goto ADDRESS(take_continuation(interp, Parrot_pcc_get_continuation(intetp, cctx), $2));
 }
 
 /*
